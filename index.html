@@ -676,22 +676,36 @@
       ctx.fillText("Tipp = nochmal", W / 2, 240);
     }
 
-    // Mute-Button oben rechts (Lautsprecher an / durchgestrichen)
+    // Mute-Button oben rechts: glatter Lautsprecher + Schallwellen (an) bzw. pinkes X (stumm)
     function drawMuteButton() {
-      const bx = W - 20, by = 7;
+      const cx = W - 15, cy = 12;
       ctx.save();
-      ctx.globalAlpha = 0.92;
-      px(bx, by + 3, 3, 5, COL.foam);
-      px(bx + 2, by + 1, 2, 9, COL.foam);
-      px(bx + 4, by - 1, 1, 13, COL.foam);
+      ctx.globalAlpha = 0.95;
+      ctx.lineJoin = "round";
+      ctx.lineCap = "round";
+      // Lautsprecher-Korpus (Box + Konus) als gefuellter Pfad
+      ctx.fillStyle = COL.foam;
+      ctx.beginPath();
+      ctx.moveTo(cx - 7, cy - 2.5);
+      ctx.lineTo(cx - 3.5, cy - 2.5);
+      ctx.lineTo(cx + 0.5, cy - 6);
+      ctx.lineTo(cx + 0.5, cy + 6);
+      ctx.lineTo(cx - 3.5, cy + 2.5);
+      ctx.lineTo(cx - 7, cy + 2.5);
+      ctx.closePath();
+      ctx.fill();
       if (muted) {
-        ctx.strokeStyle = COL.item; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.moveTo(bx + 7, by + 1); ctx.lineTo(bx + 13, by + 9); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(bx + 13, by + 1); ctx.lineTo(bx + 7, by + 9); ctx.stroke();
+        // klares pinkes X
+        ctx.strokeStyle = COL.item; ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.moveTo(cx + 4, cy - 4); ctx.lineTo(cx + 9, cy + 4);
+        ctx.moveTo(cx + 9, cy - 4); ctx.lineTo(cx + 4, cy + 4);
+        ctx.stroke();
       } else {
-        ctx.strokeStyle = COL.foam; ctx.lineWidth = 1; ctx.globalAlpha = 0.8;
-        ctx.beginPath(); ctx.arc(bx + 4, by + 5, 4, -0.7, 0.7); ctx.stroke();
-        ctx.beginPath(); ctx.arc(bx + 4, by + 5, 7, -0.7, 0.7); ctx.stroke();
+        // zwei Schallwellen-Boegen
+        ctx.strokeStyle = COL.foam; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(cx + 1, cy, 4.5, -0.7, 0.7); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx + 1, cy, 7.5, -0.7, 0.7); ctx.stroke();
       }
       ctx.restore();
     }
