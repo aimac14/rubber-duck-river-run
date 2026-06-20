@@ -114,7 +114,7 @@
 
     // Die Ente bleibt vertikal etwa mittig, Welt scrollt an ihr vorbei
     // shield = Seifenblase aktiv, turbo/invuln = Restzeit in Sekunden
-    const duck = { x: W / 2, y: H * 0.64, targetX: W / 2, tilt: 0, vx: 0, shield: false, turbo: 0, invuln: 0 };
+    const duck = { x: W / 2, y: H * 0.64, targetX: W / 2, tilt: 0, vx: 0, shield: false, turbo: 0, invuln: 0, mega: 0 };
 
     // Container fuer Spielobjekte
     const obstacles = [];
@@ -130,6 +130,8 @@
       duck: "assets/duck.png", rock: "assets/rock.png", log: "assets/log.png",
       star: "assets/star.png", shield: "assets/shield.png", turbo: "assets/turbo.png",
       water: "assets/water.jpg",
+      whirl: "assets/whirl.png", mega: "assets/mega.png",
+      coin: "assets/coin.png", gem: "assets/gem.png",
     };
     for (const k in SPRITE_SRC) { IMG[k] = new Image(); IMG[k].src = SPRITE_SRC[k]; }
     function imgReady(img) { return img && img.complete && img.naturalWidth > 0; }
@@ -238,6 +240,7 @@
       duck.shield = false;
       duck.turbo = 0;
       duck.invuln = 0;
+      duck.mega = 0;
       duck.vx = 0;
       shakeT = 0;
       newBest = false;
@@ -271,7 +274,13 @@
     // Items: meist Quietsche (Punkte), selten Schild oder Turbo
     function spawnItem() {
       const r = Math.random();
-      const type = r < 0.72 ? "squeak" : r < 0.86 ? "shield" : "turbo";
+      let type;
+      if (r < 0.34) type = "coin";        // haeufig, kleiner Bonus
+      else if (r < 0.56) type = "squeak"; // Quietsche-Stern
+      else if (r < 0.68) type = "gem";    // selten, grosser Bonus
+      else if (r < 0.80) type = "shield";
+      else if (r < 0.93) type = "turbo";
+      else type = "mega";                 // sehr selten: Riesen-Ente
       items.push({ type, x: 14 + Math.random() * (W - 28), y: -10, t: 0 });
     }
 
@@ -287,6 +296,7 @@
       // Power-up-Timer herunterzaehlen
       if (duck.turbo > 0) duck.turbo -= dt;
       if (duck.invuln > 0) duck.invuln -= dt;
+      if (duck.mega > 0) duck.mega -= dt;
 
       // Schwierigkeit: Tempo steigt mit der Distanz (je nach Stufe); Turbo beschleunigt
       const d = DIFFS[diffKey];
@@ -317,9 +327,21 @@
         const o = obstacles[i];
         o.y += speed * dt;
         o.rot += o.rotSpeed * dt;
-        // Hitbox etwas kleiner als Sprite -> fair zum Spieler
-        if (duck.invuln <= 0 && hitCircleRect(duck.x, duck.y, 7, o.x - o.w / 2, o.y - o.h / 2, o.w, o.h)) {
-          if (duck.shield) {
+        // Kollision (Riesen-Ente zerschmettert, Schild faengt ab, sonst Game-Over)
+        const hitR = duck.mega > 0 ? 15 : 7;   // grosse Ente = grosse Hitbox
+        if (hitCircleRect(duck.x, duck.y, hitR, o.x - o.w / 2, o.y - o.h / 2, o.w, o.h)) {
+          if (duck.mega > 0) {
+            // Riesen-Ente smasht das Hindernis weg
+            spawnSplash(o.x, o.y, COL.obstacle, 12);
+            bonus += 5;
+            sfx("smash");
+            shakeT = Math.max(shakeT, 0.12);
+            obstacles.splice(i, 1);
+            continue;
+          }
+          if (duck.invuln > 0) {
+            // unverwundbar (Turbo / kurz nach Schild) -> einfach durchgleiten
+          } else if (duck.shield) {
             // Seifenblase faengt einen Treffer ab und platzt
             duck.shield = false;
             duck.invuln = 0.8;
@@ -327,9 +349,10 @@
             sfx("dodge");
             obstacles.splice(i, 1);
             continue;
+          } else {
+            gameOver();
+            return;
           }
-          gameOver();
-          return;
         }
         // knapp ausgewichen? -> Dodge-Sound + kleiner Spritzer (einmal pro Hindernis)
         if (!o.passed && o.y > duck.y && Math.abs(o.x - duck.x) < o.w / 2 + 13) {
@@ -376,9 +399,12 @@
 
     // Effekt beim Einsammeln eines Items
     function collectItem(type) {
-      if (type === "squeak") { bonus += 15; sfx("squeak"); spawnSplash(duck.x, duck.y, COL.item, 8); }
+      if (type === "coin") { bonus += 8; sfx("coin"); spawnSplash(duck.x, duck.y, "#FFD93D", 7); }
+      else if (type === "squeak") { bonus += 15; sfx("squeak"); spawnSplash(duck.x, duck.y, COL.item, 8); }
+      else if (type === "gem") { bonus += 40; sfx("gem"); spawnSplash(duck.x, duck.y, "#8fe9e2", 12); }
       else if (type === "shield") { duck.shield = true; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 12); }
       else if (type === "turbo") { duck.turbo = 3.2; duck.invuln = 3.2; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 12); }
+      else if (type === "mega") { duck.mega = 5.5; duck.invuln = 5.5; sfx("mega"); shakeT = 0.3; spawnSplash(duck.x, duck.y, "#FFD93D", 18); }
     }
 
     // Spritz-Partikel erzeugen (radial)
@@ -475,29 +501,24 @@
     // Items — generiertes Sprite, leicht pulsierend (Fallback: Pixel-Icon)
     function drawItem(it) {
       const pulse = 1 + 0.12 * Math.sin(it.t * 8);
-      const img = it.type === "squeak" ? IMG.star : it.type === "shield" ? IMG.shield : IMG.turbo;
+      const img = it.type === "squeak" ? IMG.star
+        : it.type === "shield" ? IMG.shield
+        : it.type === "turbo" ? IMG.turbo
+        : it.type === "coin" ? IMG.coin
+        : it.type === "gem" ? IMG.gem
+        : IMG.mega;
       if (imgReady(img)) {
-        const s = 18 * pulse;
+        const s = (it.type === "mega" ? 24 : 18) * pulse;   // Mega-Item groesser
         ctx.drawImage(img, it.x - s / 2, it.y - s / 2, s, s);
         return;
       }
-      // Fallback: Pixel-Icon
+      // Fallback: Pixel-Punkt (greift nur, falls ein Asset nicht laedt)
       ctx.save();
       ctx.translate(Math.round(it.x), Math.round(it.y));
       ctx.scale(pulse, pulse);
-      if (it.type === "squeak") {
-        px(-4, -3, 8, 6, COL.item);
-        px(-3, -4, 6, 8, COL.item);
-        ctx.globalAlpha = 0.9; px(-2, -3, 2, 2, COL.foam); ctx.globalAlpha = 1;
-      } else if (it.type === "shield") {
-        ctx.strokeStyle = COL.item; ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.stroke();
-        ctx.globalAlpha = 0.8; px(-3, -3, 2, 2, COL.foam); ctx.globalAlpha = 1;
-      } else {
-        px(-1, -5, 2, 10, COL.item);
-        px(-4, -2, 3, 2, COL.item);
-        px( 1, -2, 3, 2, COL.item);
-      }
+      px(-4, -3, 8, 6, COL.item);
+      px(-3, -4, 6, 8, COL.item);
+      ctx.globalAlpha = 0.9; px(-2, -3, 2, 2, COL.foam); ctx.globalAlpha = 1;
       ctx.restore();
     }
 
@@ -506,14 +527,21 @@
       ctx.save();
       ctx.translate(Math.round(wp.x), Math.round(wp.y));
       ctx.rotate(wp.angle);
-      ctx.strokeStyle = COL.waterDeep; ctx.lineWidth = 2;
-      ctx.globalAlpha = 0.55;
-      for (let k = 1; k <= 3; k++) {
-        ctx.beginPath();
-        ctx.arc(0, 0, wp.r * 0.32 * k, k * 0.5, k * 0.5 + Math.PI * 1.3);
-        ctx.stroke();
+      if (imgReady(IMG.whirl)) {
+        const s = wp.r * 2.15;
+        ctx.globalAlpha = 0.92;
+        ctx.drawImage(IMG.whirl, -s / 2, -s / 2, s, s);
+        ctx.globalAlpha = 1;
+      } else {
+        ctx.strokeStyle = COL.waterDeep; ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.55;
+        for (let k = 1; k <= 3; k++) {
+          ctx.beginPath();
+          ctx.arc(0, 0, wp.r * 0.32 * k, k * 0.5, k * 0.5 + Math.PI * 1.3);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 0.7; px(-2, -2, 4, 4, COL.foam); ctx.globalAlpha = 1;
       }
-      ctx.globalAlpha = 0.7; px(-2, -2, 4, 4, COL.foam); ctx.globalAlpha = 1;
       ctx.restore();
     }
 
@@ -564,15 +592,24 @@
         ctx.globalAlpha = 1;
       }
 
-      // Ente blinkt waehrend Unverwundbarkeit nach Schild-Treffer
-      const blink = duck.invuln > 0 && duck.turbo <= 0 && Math.floor(duck.invuln * 12) % 2 === 0;
+      // goldene Aura waehrend der Riesen-Ente
+      if (duck.mega > 0) {
+        ctx.globalAlpha = 0.35 + 0.2 * Math.sin(duck.mega * 18);
+        ctx.fillStyle = COL.duck;
+        ctx.beginPath(); ctx.arc(duck.x, duck.y, 23, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      // Ente blinkt waehrend Unverwundbarkeit nach Schild-Treffer (nicht bei Mega)
+      const blink = duck.invuln > 0 && duck.turbo <= 0 && duck.mega <= 0 && Math.floor(duck.invuln * 12) % 2 === 0;
       if (!blink) {
-        // Gummi-Squash: schnelle Bewegung dehnt die Ente seitlich (Gummiente!)
+        // Gummi-Squash + Riesen-Skalierung bei Mega
         const sq = clamp(Math.abs(duck.vx) * 0.05, 0, 0.28);
+        const ms = duck.mega > 0 ? 1.7 : 1;
         ctx.save();
         ctx.translate(Math.round(duck.x), Math.round(duck.y));
         ctx.rotate(duck.tilt);
-        ctx.scale(1 + sq, 1 - sq * 0.7);
+        ctx.scale((1 + sq) * ms, (1 - sq * 0.7) * ms);
         drawDuckSprite();
         ctx.restore();
       }
