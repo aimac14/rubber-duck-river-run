@@ -1,17 +1,288 @@
 <!DOCTYPE html>
 <html lang="de">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Building Challenge - Dein Minigame</title>
-    <link rel="stylesheet" href="style.css" />
-  </head>
-  <body>
-    <main>
-      <h1>Dein Minigame</h1>
-      <canvas id="game" width="800" height="600"></canvas>
-      <p id="hint">Dein Spiel startet in <code>game.js</code>. Viel Erfolg!</p>
-    </main>
-    <script src="game.js"></script>
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#2A7E78" />
+  <title>Rubber Duck River Run</title>
+  <style>
+    /* === LAYOUT (mobile, portrait, fullscreen) === */
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #0c1413;
+      overflow: hidden;
+      font-family: "Trebuchet MS", system-ui, sans-serif;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: none;
+    }
+    #wrap {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    /* Canvas wird mit nearest-neighbour hochskaliert -> knackige Pixel */
+    #c {
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      background: #3CAEA3;
+      box-shadow: 0 0 40px rgba(0, 0, 0, 0.55);
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <!-- Interne Auflaesung fix 180x320 (9:16), per CSS hochskaliert -->
+    <canvas id="c" width="180" height="320"></canvas>
+  </div>
+
+  <script>
+  (() => {
+    "use strict";
+
+    // ================================================================
+    // === KONSTANTEN & PALETTE ("Sunny River") =======================
+    // ================================================================
+    const W = 180, H = 320;          // logische Pixel-Aufloesung
+    const COL = {
+      duck:      "#FFD93D",          // Enten-Koerper (Held)
+      beak:      "#FF8C42",          // Schnabel / Akzent
+      water:     "#3CAEA3",          // Wasser
+      waterDeep: "#2A7E78",          // Wasser-Tiefe / Schatten
+      foam:      "#E8F6F3",          // Schaum / Highlights
+      obstacle:  "#4A3B34",          // Felsen / Holz
+      item:      "#FF5DA2",          // Items / Power-ups (Signalfarbe)
+    };
+
+    // ================================================================
+    // === CANVAS & RESPONSIVE SKALIERUNG =============================
+    // ================================================================
+    const canvas = document.getElementById("c");
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
+
+    // Groesste 9:16-Box, die in den Viewport passt (fit width/height)
+    function resize() {
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const scale = Math.min(vw / W, vh / H);
+      canvas.style.width  = Math.round(W * scale) + "px";
+      canvas.style.height = Math.round(H * scale) + "px";
+    }
+    window.addEventListener("resize", resize);
+    resize();
+
+    // ================================================================
+    // === SPIELZUSTAND ===============================================
+    // ================================================================
+    const STATE = { START: "start", PLAY: "play", OVER: "over" };
+    let state = STATE.START;
+
+    let best = +(localStorage.getItem("rdrr_best") || 0);
+    let score = 0;
+    let dist = 0;            // zurueckgelegte Distanz (treibt Score & Tempo)
+    let speed = 0;           // aktuelle Scroll-Geschwindigkeit (px/s)
+    let scrollY = 0;         // Versatz fuer Hintergrund-Wellen
+
+    // Die Ente bleibt vertikal etwa mittig, Welt scrollt an ihr vorbei
+    const duck = { x: W / 2, y: H * 0.64, targetX: W / 2, tilt: 0 };
+
+    // Container fuer spaetere Stufen (Hindernisse, Items, Partikel)
+    const obstacles = [];
+    const items = [];
+    const particles = [];
+
+    // Schaum-Streifen fuer die Wasser-Animation
+    let foam = [];
+    function initFoam() {
+      foam = [];
+      for (let i = 0; i < 14; i++) {
+        foam.push({
+          x: Math.random() * W,
+          y: Math.random() * H,
+          w: 6 + Math.random() * 14,
+          deep: Math.random() < 0.4,   // dunklere Tiefe-Streifen
+        });
+      }
+    }
+    initFoam();
+
+    // ================================================================
+    // === INPUT (nur Touch / Pointer) ================================
+    // ================================================================
+    // Bildschirm-Koordinaten in logische Canvas-Koordinaten umrechnen
+    function pointerX(e) {
+      const r = canvas.getBoundingClientRect();
+      return ((e.clientX - r.left) / r.width) * W;
+    }
+
+    function onDown(e) {
+      e.preventDefault();
+      if (state === STATE.START) { startGame(); }
+      else if (state === STATE.OVER) { startGame(); }
+      duck.targetX = clamp(pointerX(e), 8, W - 8);
+    }
+    function onMove(e) {
+      if (state !== STATE.PLAY) return;
+      e.preventDefault();
+      duck.targetX = clamp(pointerX(e), 8, W - 8);
+    }
+    canvas.addEventListener("pointerdown", onDown, { passive: false });
+    window.addEventListener("pointermove", onMove, { passive: false });
+
+    // ================================================================
+    // === SPIEL-START / RESET ========================================
+    // ================================================================
+    function startGame() {
+      state = STATE.PLAY;
+      score = 0;
+      dist = 0;
+      speed = 70;                 // sanfter Start (erste Sekunden leicht)
+      duck.x = W / 2;
+      duck.targetX = W / 2;
+      duck.tilt = 0;
+      obstacles.length = 0;
+      items.length = 0;
+      particles.length = 0;
+    }
+
+    // ================================================================
+    // === UPDATE (Logik, Delta-Time in Sekunden) =====================
+    // ================================================================
+    function update(dt) {
+      // Schwierigkeit: Tempo steigt langsam mit der Distanz
+      speed = 70 + Math.min(160, dist * 0.012);
+      dist += speed * dt;
+      score = Math.floor(dist / 10);
+
+      // Ente folgt dem Finger weich (ease), Neigung zeigt Richtung
+      const prevX = duck.x;
+      duck.x += (duck.targetX - duck.x) * Math.min(1, dt * 12);
+      const dx = duck.x - prevX;
+      duck.tilt += ((clamp(dx * 0.12, -0.35, 0.35)) - duck.tilt) * Math.min(1, dt * 10);
+
+      // Wasser-Animation scrollt nach unten
+      scrollY = (scrollY + speed * dt) % H;
+      for (const f of foam) {
+        f.y += speed * dt;
+        if (f.y > H) { f.y -= H; f.x = Math.random() * W; }
+      }
+    }
+
+    // ================================================================
+    // === RENDER =====================================================
+    // ================================================================
+    function drawWater() {
+      ctx.fillStyle = COL.water;
+      ctx.fillRect(0, 0, W, H);
+      // ruhige Wellen-/Schaum-Streifen (Tiefe + Highlights)
+      for (const f of foam) {
+        ctx.fillStyle = f.deep ? COL.waterDeep : COL.foam;
+        ctx.globalAlpha = f.deep ? 0.35 : 0.55;
+        ctx.fillRect(Math.round(f.x), Math.round(f.y), f.w, 2);
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // Pixel-Helfer
+    function px(x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x, y, w, h); }
+
+    // Gummiente von oben (top-down), Schnabel zeigt nach vorn (oben)
+    function drawDuck() {
+      // Wasser-Schatten (unrotiert, gibt Tiefe)
+      ctx.fillStyle = "rgba(0,0,0,0.16)";
+      ctx.beginPath();
+      ctx.ellipse(duck.x, duck.y + 7, 11, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.save();
+      ctx.translate(Math.round(duck.x), Math.round(duck.y));
+      ctx.rotate(duck.tilt);
+
+      // Koerper (gelbes Oval aus Bloecken)
+      px(-6, -8, 12, 2, COL.duck);
+      px(-8, -6, 16, 4, COL.duck);
+      px(-9, -2, 18, 6, COL.duck);
+      px(-8,  4, 16, 4, COL.duck);
+      px(-6,  8, 12, 2, COL.duck);
+      // Kopf
+      px(-4, -13, 8, 6, COL.duck);
+      px(-3, -15, 6, 2, COL.duck);
+      // Schnabel (orange, nach vorn)
+      px(-2, -17, 4, 2, COL.beak);
+      px(-3, -16, 6, 1, COL.beak);
+      // Augen
+      px(-3, -12, 1, 1, "#1a1a1a");
+      px( 2, -12, 1, 1, "#1a1a1a");
+
+      ctx.restore();
+    }
+
+    function drawHUD() {
+      ctx.font = "bold 13px 'Trebuchet MS', monospace";
+      ctx.textAlign = "left";
+      ctx.fillStyle = "#0c2b29";            // Schatten fuer Lesbarkeit
+      ctx.fillText(String(score), 7, 17);
+      ctx.fillStyle = COL.foam;             // Haupttext
+      ctx.fillText(String(score), 6, 16);
+    }
+
+    function drawStart() {
+      // halbtransparentes Panel
+      ctx.fillStyle = "rgba(12,43,41,0.55)";
+      ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = "center";
+
+      ctx.fillStyle = COL.duck;
+      ctx.font = "bold 20px 'Trebuchet MS', sans-serif";
+      ctx.fillText("RUBBER DUCK", W / 2, 92);
+      ctx.fillText("RIVER RUN", W / 2, 116);
+
+      ctx.fillStyle = COL.foam;
+      ctx.font = "12px 'Trebuchet MS', sans-serif";
+      ctx.fillText("Tipp = Start", W / 2, 168);
+      ctx.fillText("Finger ziehen = lenken", W / 2, 186);
+
+      ctx.fillStyle = COL.item;
+      ctx.font = "bold 12px 'Trebuchet MS', sans-serif";
+      ctx.fillText("Best: " + best, W / 2, 226);
+    }
+
+    function render() {
+      drawWater();
+
+      // (Hindernisse / Items folgen in spaeteren Stufen)
+      for (const o of obstacles) { /* Stufe 2 */ }
+      for (const it of items) { /* Stufe 3 */ }
+
+      drawDuck();
+
+      if (state === STATE.PLAY) drawHUD();
+      if (state === STATE.START) drawStart();
+    }
+
+    // ================================================================
+    // === GAME-LOOP (requestAnimationFrame + Delta-Time) =============
+    // ================================================================
+    let last = performance.now();
+    function frame(now) {
+      const dt = Math.min(0.05, (now - last) / 1000); // clamp gegen Tab-Sprünge
+      last = now;
+      if (state === STATE.PLAY) update(dt);
+      render();
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+
+    // ================================================================
+    // === HILFSFUNKTIONEN ============================================
+    // ================================================================
+    function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+  })();
+  </script>
+</body>
 </html>
