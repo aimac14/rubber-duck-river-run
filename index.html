@@ -90,13 +90,18 @@
     let scrollY = 0;         // Versatz fuer Hintergrund-Wellen
     let newBest = false;     // im aktuellen Lauf neuer Rekord erzielt?
     let spawnTimer = 0;      // Countdown bis zum naechsten Hindernis (s)
+    let itemTimer = 0;       // Countdown bis zum naechsten Item (s)
+    let whirlTimer = 0;      // Countdown bis zum naechsten Whirlpool (s)
+    let bonus = 0;           // Bonuspunkte aus eingesammelten Quietschern
 
     // Die Ente bleibt vertikal etwa mittig, Welt scrollt an ihr vorbei
-    const duck = { x: W / 2, y: H * 0.64, targetX: W / 2, tilt: 0 };
+    // shield = Seifenblase aktiv, turbo/invuln = Restzeit in Sekunden
+    const duck = { x: W / 2, y: H * 0.64, targetX: W / 2, tilt: 0, shield: false, turbo: 0, invuln: 0 };
 
-    // Container fuer spaetere Stufen (Hindernisse, Items, Partikel)
+    // Container fuer Spielobjekte
     const obstacles = [];
-    const items = [];
+    const items = [];          // Quietsche-Collectibles + Power-ups
+    const whirls = [];         // Whirlpools (Sog)
     const particles = [];
 
     // Schaum-Streifen fuer die Wasser-Animation
@@ -150,9 +155,16 @@
       duck.tilt = 0;
       obstacles.length = 0;
       items.length = 0;
+      whirls.length = 0;
       particles.length = 0;
+      bonus = 0;
+      duck.shield = false;
+      duck.turbo = 0;
+      duck.invuln = 0;
       newBest = false;
       spawnTimer = 1.4;           // erste ~1,5s bewusst ruhig (fairer Start)
+      itemTimer = 2.2;
+      whirlTimer = 6.0;           // Whirlpools erst spaeter im Lauf
     }
 
     // ================================================================
@@ -177,14 +189,31 @@
       }
     }
 
+    // Items: meist Quietsche (Punkte), selten Schild oder Turbo
+    function spawnItem() {
+      const r = Math.random();
+      const type = r < 0.72 ? "squeak" : r < 0.86 ? "shield" : "turbo";
+      items.push({ type, x: 14 + Math.random() * (W - 28), y: -10, t: 0 });
+    }
+
+    // Whirlpool: zieht die Ente Richtung Zentrum (nicht toedlich, aber gefaehrlich)
+    function spawnWhirl() {
+      whirls.push({ x: 24 + Math.random() * (W - 48), y: -30, r: 34, angle: 0 });
+    }
+
     // ================================================================
     // === UPDATE (Logik, Delta-Time in Sekunden) =====================
     // ================================================================
     function update(dt) {
-      // Schwierigkeit: Tempo steigt langsam mit der Distanz
-      speed = 70 + Math.min(160, dist * 0.012);
+      // Power-up-Timer herunterzaehlen
+      if (duck.turbo > 0) duck.turbo -= dt;
+      if (duck.invuln > 0) duck.invuln -= dt;
+
+      // Schwierigkeit: Tempo steigt langsam mit der Distanz; Turbo beschleunigt
+      const base = 70 + Math.min(160, dist * 0.012);
+      speed = duck.turbo > 0 ? base * 1.7 : base;
       dist += speed * dt;
-      score = Math.floor(dist / 10);
+      score = Math.floor(dist / 10) + bonus;
 
       // Ente folgt dem Finger weich (ease), Neigung zeigt Richtung
       const prevX = duck.x;
@@ -212,12 +241,59 @@
         o.y += speed * dt;
         o.rot += o.rotSpeed * dt;
         // Hitbox etwas kleiner als Sprite -> fair zum Spieler
-        if (hitCircleRect(duck.x, duck.y, 7, o.x - o.w / 2, o.y - o.h / 2, o.w, o.h)) {
+        if (duck.invuln <= 0 && hitCircleRect(duck.x, duck.y, 7, o.x - o.w / 2, o.y - o.h / 2, o.w, o.h)) {
+          if (duck.shield) {
+            // Seifenblase faengt einen Treffer ab und platzt
+            duck.shield = false;
+            duck.invuln = 0.8;
+            obstacles.splice(i, 1);
+            continue;
+          }
           gameOver();
           return;
         }
         if (o.y - o.h > H + 20) obstacles.splice(i, 1);
       }
+
+      // Items bewegen + einsammeln
+      for (let i = items.length - 1; i >= 0; i--) {
+        const it = items[i];
+        it.y += speed * dt;
+        it.t += dt;
+        if (hitCircleRect(duck.x, duck.y, 9, it.x - 6, it.y - 6, 12, 12)) {
+          collectItem(it.type);
+          items.splice(i, 1);
+          continue;
+        }
+        if (it.y - 10 > H + 20) items.splice(i, 1);
+      }
+
+      // Whirlpools bewegen + Sog auf die Ente ausueben
+      for (let i = whirls.length - 1; i >= 0; i--) {
+        const wp = whirls[i];
+        wp.y += speed * dt;
+        wp.angle += dt * 2.5;
+        const wx = wp.x - duck.x, wy = wp.y - duck.y;
+        const d = Math.hypot(wx, wy);
+        if (d < wp.r && d > 0.1) {
+          const pull = (1 - d / wp.r) * 70 * dt;   // Sog staerker je naeher am Zentrum
+          duck.x = clamp(duck.x + (wx / d) * pull, 8, W - 8);
+        }
+        if (wp.y - wp.r > H + 20) whirls.splice(i, 1);
+      }
+
+      // Item- und Whirlpool-Spawner
+      itemTimer -= dt;
+      if (itemTimer <= 0) { spawnItem(); itemTimer = 1.6 + Math.random() * 1.8; }
+      whirlTimer -= dt;
+      if (whirlTimer <= 0) { spawnWhirl(); whirlTimer = clamp(7 - dist * 0.0001, 3.5, 7) + Math.random() * 2; }
+    }
+
+    // Effekt beim Einsammeln eines Items
+    function collectItem(type) {
+      if (type === "squeak") bonus += 15;
+      else if (type === "shield") duck.shield = true;
+      else if (type === "turbo") { duck.turbo = 3.2; duck.invuln = 3.2; }
     }
 
     // ================================================================
@@ -297,18 +373,40 @@
       px( 2, -12, 1, 1, "#1a1a1a");
     }
 
-    // Gummiente von oben (top-down): Wasser-Schatten + Position + Neigung
+    // Gummiente von oben (top-down): Wasser-Schatten + Power-up-Effekte + Neigung
     function drawDuck() {
       ctx.fillStyle = "rgba(0,0,0,0.16)";
       ctx.beginPath();
       ctx.ellipse(duck.x, duck.y + 7, 11, 5, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.save();
-      ctx.translate(Math.round(duck.x), Math.round(duck.y));
-      ctx.rotate(duck.tilt);
-      drawDuckSprite();
-      ctx.restore();
+      // Turbo: Speed-Linien hinter der Ente (Signalfarbe foam)
+      if (duck.turbo > 0) {
+        ctx.globalAlpha = 0.5 + 0.3 * Math.sin(duck.turbo * 30);
+        for (let k = 0; k < 3; k++) px(duck.x - 6 + k * 5, duck.y + 12 + k * 4, 2, 6, COL.foam);
+        ctx.globalAlpha = 1;
+      }
+
+      // Ente blinkt waehrend Unverwundbarkeit nach Schild-Treffer
+      const blink = duck.invuln > 0 && duck.turbo <= 0 && Math.floor(duck.invuln * 12) % 2 === 0;
+      if (!blink) {
+        ctx.save();
+        ctx.translate(Math.round(duck.x), Math.round(duck.y));
+        ctx.rotate(duck.tilt);
+        drawDuckSprite();
+        ctx.restore();
+      }
+
+      // Seifenblasen-Schild: heller Ring um die Ente (Signalfarbe foam + pinker Schimmer)
+      if (duck.shield) {
+        ctx.globalAlpha = 0.85;
+        ctx.strokeStyle = COL.foam; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(duck.x, duck.y - 1, 14, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 0.4;
+        ctx.strokeStyle = COL.item;
+        ctx.beginPath(); ctx.arc(duck.x, duck.y - 1, 14, 0.5, 2.2); ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
     }
 
     function drawHUD() {
@@ -318,6 +416,13 @@
       ctx.fillText(String(score), 7, 17);
       ctx.fillStyle = COL.foam;             // Haupttext
       ctx.fillText(String(score), 6, 16);
+
+      // aktive Power-ups oben rechts
+      ctx.textAlign = "right";
+      ctx.font = "bold 9px 'Trebuchet MS', monospace";
+      let hy = 14;
+      if (duck.shield) { ctx.fillStyle = COL.foam; ctx.fillText("SCHILD", W - 6, hy); hy += 11; }
+      if (duck.turbo > 0) { ctx.fillStyle = COL.item; ctx.fillText("TURBO", W - 6, hy); }
     }
 
     function drawStart() {
@@ -379,8 +484,9 @@
     function render() {
       drawWater();
 
+      for (const wp of whirls) drawWhirl(wp);
       for (const o of obstacles) drawObstacle(o);
-      for (const it of items) { /* Items folgen in Stufe 3 */ }
+      for (const it of items) drawItem(it);
 
       // fahrende Ente nur im Spiel / Game-Over (Start zeigt eigene Hero-Ente)
       if (state !== STATE.START) drawDuck();
