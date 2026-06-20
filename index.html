@@ -93,10 +93,19 @@
     let itemTimer = 0;       // Countdown bis zum naechsten Item (s)
     let whirlTimer = 0;      // Countdown bis zum naechsten Whirlpool (s)
     let bonus = 0;           // Bonuspunkte aus eingesammelten Quietschern
+    let shakeT = 0;          // Screen-Shake-Restzeit (s)
+    let gameOverMsg = "";    // Debugging-Spruch fuer den Game-Over-Screen
+
+    // Rubber-Duck-Debugging-Sprueche (Gruss an die Coding-Jury)
+    const QUACKS = [
+      "Stack Overflow!", "Kernel Quack", "Works on my machine",
+      "Segmentation Quack", "NullPointerEnte", "git push --force",
+      "Der Bug war die Ente", "404: Ufer not found", "Quack & crash",
+    ];
 
     // Die Ente bleibt vertikal etwa mittig, Welt scrollt an ihr vorbei
     // shield = Seifenblase aktiv, turbo/invuln = Restzeit in Sekunden
-    const duck = { x: W / 2, y: H * 0.64, targetX: W / 2, tilt: 0, shield: false, turbo: 0, invuln: 0 };
+    const duck = { x: W / 2, y: H * 0.64, targetX: W / 2, tilt: 0, vx: 0, shield: false, turbo: 0, invuln: 0 };
 
     // Container fuer Spielobjekte
     const obstacles = [];
@@ -210,6 +219,8 @@
       duck.shield = false;
       duck.turbo = 0;
       duck.invuln = 0;
+      duck.vx = 0;
+      shakeT = 0;
       newBest = false;
       spawnTimer = 1.4;           // erste ~1,5s bewusst ruhig (fairer Start)
       itemTimer = 2.2;
@@ -268,6 +279,7 @@
       const prevX = duck.x;
       duck.x += (duck.targetX - duck.x) * Math.min(1, dt * 12);
       const dx = duck.x - prevX;
+      duck.vx = dx;
       duck.tilt += ((clamp(dx * 0.12, -0.35, 0.35)) - duck.tilt) * Math.min(1, dt * 10);
 
       // Wasser-Animation scrollt nach unten
@@ -295,16 +307,19 @@
             // Seifenblase faengt einen Treffer ab und platzt
             duck.shield = false;
             duck.invuln = 0.8;
+            spawnSplash(duck.x, duck.y, COL.foam, 14);
+            sfx("dodge");
             obstacles.splice(i, 1);
             continue;
           }
           gameOver();
           return;
         }
-        // knapp ausgewichen? -> Dodge-Sound (einmal pro Hindernis)
+        // knapp ausgewichen? -> Dodge-Sound + kleiner Spritzer (einmal pro Hindernis)
         if (!o.passed && o.y > duck.y && Math.abs(o.x - duck.x) < o.w / 2 + 13) {
           o.passed = true;
           sfx("dodge");
+          spawnSplash(duck.x, duck.y - 4, COL.foam, 4);
         }
         if (o.y - o.h > H + 20) obstacles.splice(i, 1);
       }
@@ -345,9 +360,32 @@
 
     // Effekt beim Einsammeln eines Items
     function collectItem(type) {
-      if (type === "squeak") { bonus += 15; sfx("squeak"); }
-      else if (type === "shield") { duck.shield = true; sfx("power"); }
-      else if (type === "turbo") { duck.turbo = 3.2; duck.invuln = 3.2; sfx("power"); }
+      if (type === "squeak") { bonus += 15; sfx("squeak"); spawnSplash(duck.x, duck.y, COL.item, 8); }
+      else if (type === "shield") { duck.shield = true; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 12); }
+      else if (type === "turbo") { duck.turbo = 3.2; duck.invuln = 3.2; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 12); }
+    }
+
+    // Spritz-Partikel erzeugen (radial)
+    function spawnSplash(x, y, color, count) {
+      for (let i = 0; i < count; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const sp = 20 + Math.random() * 60;
+        particles.push({
+          x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+          life: 0.3 + Math.random() * 0.3, max: 0.6, color, size: 1 + Math.random() * 2,
+        });
+      }
+    }
+
+    // Partikel bewegen + ausklingen (laeuft in jedem State weiter)
+    function updateParticles(dt) {
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx * dt; p.y += p.vy * dt;
+        p.vx *= 0.92; p.vy *= 0.92;       // Reibung
+        p.life -= dt;
+        if (p.life <= 0) particles.splice(i, 1);
+      }
     }
 
     // ================================================================
@@ -356,6 +394,9 @@
     function gameOver() {
       state = STATE.OVER;
       sfx("over");
+      shakeT = 0.4;
+      spawnSplash(duck.x, duck.y, COL.foam, 16);
+      gameOverMsg = QUACKS[Math.floor(Math.random() * QUACKS.length)];
       newBest = score > best;
       if (newBest) {
         best = score;
@@ -450,6 +491,15 @@
       ctx.restore();
     }
 
+    // Spritz-Partikel zeichnen (blenden mit der Restlebenszeit aus)
+    function drawParticles() {
+      for (const p of particles) {
+        ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
+        px(Math.round(p.x), Math.round(p.y), p.size, p.size, p.color);
+      }
+      ctx.globalAlpha = 1;
+    }
+
     // Enten-Sprite um den Ursprung (0,0) — wiederverwendbar (Spiel + Start-Screen)
     function drawDuckSprite() {
       // Koerper (gelbes Oval aus Bloecken)
@@ -486,9 +536,12 @@
       // Ente blinkt waehrend Unverwundbarkeit nach Schild-Treffer
       const blink = duck.invuln > 0 && duck.turbo <= 0 && Math.floor(duck.invuln * 12) % 2 === 0;
       if (!blink) {
+        // Gummi-Squash: schnelle Bewegung dehnt die Ente seitlich (Gummiente!)
+        const sq = clamp(Math.abs(duck.vx) * 0.05, 0, 0.28);
         ctx.save();
         ctx.translate(Math.round(duck.x), Math.round(duck.y));
         ctx.rotate(duck.tilt);
+        ctx.scale(1 + sq, 1 - sq * 0.7);
         drawDuckSprite();
         ctx.restore();
       }
@@ -532,6 +585,12 @@
       ctx.fillText("RUBBER DUCK", W / 2, 84);
       ctx.fillText("RIVER RUN", W / 2, 108);
 
+      ctx.fillStyle = COL.foam;
+      ctx.globalAlpha = 0.7;
+      ctx.font = "italic 9px 'Trebuchet MS', sans-serif";
+      ctx.fillText("Rubber-Duck-Debugging als Sport", W / 2, 124);
+      ctx.globalAlpha = 1;
+
       // prominente Hero-Ente, knallgelb ueber dem Panel
       ctx.save();
       ctx.translate(W / 2, 158);
@@ -572,6 +631,11 @@
         ctx.fillText("Best: " + best, W / 2, 184);
       }
 
+      // Rubber-Duck-Debugging-Spruch (Gruss an die Jury)
+      ctx.fillStyle = COL.beak;
+      ctx.font = "italic bold 11px 'Trebuchet MS', sans-serif";
+      ctx.fillText('"' + gameOverMsg + '"', W / 2, 212);
+
       ctx.fillStyle = COL.foam;
       ctx.font = "12px 'Trebuchet MS', sans-serif";
       ctx.fillText("Tipp = nochmal", W / 2, 240);
@@ -598,19 +662,26 @@
     }
 
     function render() {
-      drawWater();
+      ctx.save();
+      // Screen-Shake bei Aufprall (klingt aus)
+      if (shakeT > 0) {
+        const s = 6 * (shakeT / 0.4);
+        ctx.translate((Math.random() - 0.5) * s, (Math.random() - 0.5) * s);
+      }
 
+      drawWater();
       for (const wp of whirls) drawWhirl(wp);
       for (const o of obstacles) drawObstacle(o);
       for (const it of items) drawItem(it);
-
       // fahrende Ente nur im Spiel / Game-Over (Start zeigt eigene Hero-Ente)
       if (state !== STATE.START) drawDuck();
+      drawParticles();
+      ctx.restore();
 
+      // HUD & Overlays ohne Shake (bleiben ruhig lesbar)
       if (state === STATE.PLAY) drawHUD();
       if (state === STATE.START) drawStart();
       if (state === STATE.OVER) drawGameOver();
-
       drawMuteButton();   // immer sichtbar (alle States)
     }
 
@@ -622,6 +693,8 @@
       const dt = Math.min(0.05, (now - last) / 1000); // clamp gegen Tab-Sprünge
       last = now;
       if (state === STATE.PLAY) update(dt);
+      if (shakeT > 0) shakeT -= dt;     // Shake klingt auch im Game-Over aus
+      updateParticles(dt);              // Partikel laufen in jedem State weiter
       render();
       requestAnimationFrame(frame);
     }
