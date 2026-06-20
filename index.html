@@ -87,6 +87,7 @@
     let best = +(localStorage.getItem("rdrr_best") || 0);
     let coins = +(localStorage.getItem("rdrr_coins") || 0);   // persistentes Muenzen-Konto
     let runCoins = 0;                                         // im aktuellen Lauf gesammelt
+    let revivedThisRun = false;                              // Weiterspielen 1x pro Lauf
 
     // Enten-Skins (im Shop kaufbar)
     const DUCKS = [
@@ -303,7 +304,10 @@
         return;
       }
       if (state === STATE.START) { startGame(); }
-      else if (state === STATE.OVER) { startGame(); }
+      else if (state === STATE.OVER) {
+        if (!revivedThisRun && my > 194 && my < 220) { revive(); return; }
+        startGame();
+      }
       duck.targetX = clamp(mx, 8, W - 8);
     }
     function onMove(e) {
@@ -332,6 +336,7 @@
       particles.length = 0;
       bonus = 0;
       runCoins = 0;
+      revivedThisRun = false;
       combo = 0;
       comboTimer = 0;
       popups.length = 0;
@@ -588,6 +593,19 @@
         best = score;
         localStorage.setItem("rdrr_best", String(best));
       }
+    }
+
+    // Einmal pro Lauf weiterspielen (Hindernisse weg, kurze Unverwundbarkeit)
+    function revive() {
+      state = STATE.PLAY;
+      revivedThisRun = true;
+      obstacles.length = 0;
+      whirls.length = 0;
+      duck.x = W / 2; duck.targetX = W / 2;
+      duck.invuln = 2.5;
+      duck.shield = false; duck.turbo = 0; duck.mega = 0;
+      spawnTimer = 1.0;
+      sfx("power");
     }
 
     // ================================================================
@@ -909,47 +927,53 @@
     }
 
     function drawGameOver() {
-      ctx.fillStyle = "rgba(10,30,28,0.72)";
+      ctx.fillStyle = "rgba(10,30,28,0.74)";
       ctx.fillRect(0, 0, W, H);
       ctx.textAlign = "center";
 
       ctx.fillStyle = COL.foam;
-      ctx.font = "bold 22px 'Trebuchet MS', sans-serif";
-      ctx.fillText("GAME OVER", W / 2, 112);
+      ctx.font = "bold 21px 'Trebuchet MS', sans-serif";
+      ctx.fillText("GAME OVER", W / 2, 92);
 
       ctx.fillStyle = COL.duck;
-      ctx.font = "bold 30px 'Trebuchet MS', sans-serif";
-      ctx.fillText(String(score), W / 2, 158);
+      ctx.font = "bold 28px 'Trebuchet MS', sans-serif";
+      ctx.fillText(String(score), W / 2, 134);
 
-      if (newBest) {
-        ctx.fillStyle = COL.item;
-        ctx.font = "bold 13px 'Trebuchet MS', sans-serif";
-        ctx.fillText("NEW BEST!", W / 2, 184);
-      } else {
-        ctx.fillStyle = COL.foam;
-        ctx.font = "12px 'Trebuchet MS', sans-serif";
-        ctx.fillText("Best: " + best, W / 2, 184);
-      }
+      ctx.font = "bold 12px 'Trebuchet MS', sans-serif";
+      ctx.fillStyle = newBest ? COL.item : COL.foam;
+      ctx.fillText(newBest ? "NEW BEST!" : "Best: " + best, W / 2, 156);
 
       // Rubber-Duck-Debugging-Spruch (Gruss an die Jury)
       ctx.fillStyle = COL.beak;
-      ctx.font = "italic bold 11px 'Trebuchet MS', sans-serif";
-      ctx.fillText('"' + gameOverMsg + '"', W / 2, 212);
+      ctx.font = "italic bold 10px 'Trebuchet MS', sans-serif";
+      ctx.fillText('"' + gameOverMsg + '"', W / 2, 178);
 
-      ctx.fillStyle = COL.foam;
-      ctx.font = "12px 'Trebuchet MS', sans-serif";
-      ctx.fillText("Tipp = nochmal", W / 2, 236);
+      // Weiterspielen-Button (1x pro Lauf) oder Neustart-Hinweis
+      if (!revivedThisRun) {
+        ctx.fillStyle = COL.item;
+        ctx.beginPath(); ctx.roundRect(W / 2 - 58, 196, 116, 22, 11); ctx.fill();
+        ctx.fillStyle = "#0c2b29";
+        ctx.font = "bold 12px 'Trebuchet MS', sans-serif";
+        ctx.fillText("WEITERSPIELEN", W / 2, 211);
+        ctx.fillStyle = "rgba(232,246,243,0.6)";
+        ctx.font = "8px 'Trebuchet MS', sans-serif";
+        ctx.fillText("(sonst woanders tippen = neu)", W / 2, 230);
+      } else {
+        ctx.fillStyle = COL.foam;
+        ctx.font = "12px 'Trebuchet MS', sans-serif";
+        ctx.fillText("Tipp = nochmal", W / 2, 212);
+      }
 
       // aktive Missionen
       ctx.fillStyle = "rgba(232,246,243,0.5)";
       ctx.font = "bold 8px 'Trebuchet MS', sans-serif";
-      ctx.fillText("MISSIONEN", W / 2, 258);
+      ctx.fillText("MISSIONEN", W / 2, 250);
       ctx.font = "9px 'Trebuchet MS', sans-serif";
-      ctx.globalAlpha = 0.85;
+      ctx.globalAlpha = 0.9;
       for (let i = 0; i < missions.length; i++) {
         const m = missions[i];
         ctx.fillStyle = m.prog >= m.target ? COL.item : COL.foam;
-        ctx.fillText(m.text.replace("#", m.target) + " (" + Math.min(m.prog, m.target) + "/" + m.target + ")", W / 2, 272 + i * 13);
+        ctx.fillText(m.text.replace("#", m.target) + " (" + Math.min(m.prog, m.target) + "/" + m.target + ")", W / 2, 264 + i * 13);
       }
       ctx.globalAlpha = 1;
     }
