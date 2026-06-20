@@ -136,6 +136,7 @@
     const SPRITE_SRC = {
       duck: "assets/duck.png", rock: "assets/rock.png", log: "assets/log.png",
       star: "assets/star.png", shield: "assets/shield.png", turbo: "assets/turbo.png",
+      water: "assets/water.jpg",
     };
     for (const k in SPRITE_SRC) { IMG[k] = new Image(); IMG[k].src = SPRITE_SRC[k]; }
     function imgReady(img) { return img && img.complete && img.naturalWidth > 0; }
@@ -252,7 +253,7 @@
         });
       } else {
         // Treibholz: breiter Balken, leichte Drehung
-        const w = 34 + Math.random() * 38;
+        const w = 26 + Math.random() * 22;   // schmaler -> Holz nicht mehr zu gross
         obstacles.push({
           type: "log", x: w / 2 + Math.random() * (W - w), y: -12,
           w: w, h: w * 0.34, rot: (Math.random() - 0.5) * 0.2,
@@ -294,8 +295,8 @@
       duck.vx = dx;
       duck.tilt += ((clamp(dx * 0.12, -0.35, 0.35)) - duck.tilt) * Math.min(1, dt * 10);
 
-      // Wasser-Animation scrollt nach unten
-      scrollY = (scrollY + speed * dt) % H;
+      // Wasser-Animation scrollt nach unten (modulo Textur-Hoehe = W)
+      scrollY = (scrollY + speed * dt) % W;
       for (const f of foam) {
         f.y += speed * dt;
         if (f.y > H) { f.y -= H; f.x = Math.random() * W; }
@@ -420,12 +421,20 @@
     // === RENDER =====================================================
     // ================================================================
     function drawWater() {
-      ctx.fillStyle = COL.water;
-      ctx.fillRect(0, 0, W, H);
-      // ruhige Wellen-/Schaum-Streifen (Tiefe + Highlights)
+      if (imgReady(IMG.water)) {
+        // gekachelte, vertikal scrollende Wasser-Textur
+        const th = W;   // 1:1-Textur auf Canvas-Breite skaliert
+        for (let y = (scrollY % th) - th; y < H; y += th) {
+          ctx.drawImage(IMG.water, 0, Math.round(y), W, th);
+        }
+      } else {
+        ctx.fillStyle = COL.water;
+        ctx.fillRect(0, 0, W, H);
+      }
+      // dezente Schaum-Streifen (Bewegung + kaschieren die Kachel-Naht)
       for (const f of foam) {
         ctx.fillStyle = f.deep ? COL.waterDeep : COL.foam;
-        ctx.globalAlpha = f.deep ? 0.35 : 0.55;
+        ctx.globalAlpha = f.deep ? 0.28 : 0.42;
         ctx.fillRect(Math.round(f.x), Math.round(f.y), f.w, 2);
       }
       ctx.globalAlpha = 1;
@@ -441,7 +450,7 @@
         ctx.save();
         ctx.translate(o.x, o.y);
         ctx.rotate(o.rot);
-        const s = o.w * 1.35;   // etwas groesser als die Hitbox (transparenter Rand)
+        const s = o.w * (o.type === "rock" ? 1.35 : 1.18);   // Holz weniger aufblasen
         ctx.drawImage(img, -s / 2, -s / 2, s, s);
         ctx.restore();
         return;
