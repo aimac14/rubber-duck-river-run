@@ -98,6 +98,44 @@
     ];
     let owned = JSON.parse(localStorage.getItem("rdrr_owned") || '["duck"]');
     let selDuck = localStorage.getItem("rdrr_duck") || "duck";
+
+    // === MISSIONEN ===
+    const MISSION_POOL = [
+      { type: "coins", target: 30, reward: 20, text: "Sammle # Muenzen" },
+      { type: "coins", target: 60, reward: 45, text: "Sammle # Muenzen" },
+      { type: "gems", target: 4, reward: 30, text: "Sammle # Diamanten" },
+      { type: "smash", target: 10, reward: 25, text: "Smashe # Hindernisse" },
+      { type: "magnet", target: 2, reward: 20, text: "Nutze # Magnete" },
+      { type: "dodge", target: 50, reward: 25, text: "Weiche # Hindernissen aus" },
+    ];
+    let missionFlash = 0;
+    function newMission() {
+      const m = MISSION_POOL[Math.floor(Math.random() * MISSION_POOL.length)];
+      return { type: m.type, target: m.target, reward: m.reward, text: m.text, prog: 0 };
+    }
+    let missions = (() => {
+      const s = localStorage.getItem("rdrr_missions");
+      if (s) { try { return JSON.parse(s); } catch (e) {} }
+      const m = [newMission(), newMission(), newMission()];
+      localStorage.setItem("rdrr_missions", JSON.stringify(m));
+      return m;
+    })();
+    function addMission(type, n) {
+      let upd = false;
+      for (let i = 0; i < missions.length; i++) {
+        const m = missions[i];
+        if (m.type === type && m.prog < m.target) {
+          m.prog += n; upd = true;
+          if (m.prog >= m.target) {
+            coins += m.reward;
+            localStorage.setItem("rdrr_coins", String(coins));
+            missions[i] = newMission();
+            missionFlash = 2.5;
+          }
+        }
+      }
+      if (upd) localStorage.setItem("rdrr_missions", JSON.stringify(missions));
+    }
     let score = 0;
     let dist = 0;            // zurueckgelegte Distanz (treibt Score & Tempo)
     let speed = 0;           // aktuelle Scroll-Geschwindigkeit (px/s)
@@ -363,6 +401,7 @@
       if (duck.mega > 0) duck.mega -= dt;
       if (duck.magnet > 0) duck.magnet -= dt;
       if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) combo = 0; }
+      if (missionFlash > 0) missionFlash -= dt;
 
       // Tageszeit-Phase wechseln (mit kurzer Namens-Einblendung)
       const ph = Math.floor(dist / PHASE_LEN) % PHASES.length;
@@ -405,6 +444,7 @@
             // Riesen-Ente smasht das Hindernis weg
             spawnSplash(o.x, o.y, COL.obstacle, 12);
             addScore(5, o.x, o.y - 8, COL.foam);
+            addMission("smash", 1);
             sfx("smash");
             shakeT = Math.max(shakeT, 0.12);
             obstacles.splice(i, 1);
@@ -429,6 +469,7 @@
         if (!o.passed && o.y > duck.y && Math.abs(o.x - duck.x) < o.w / 2 + 13) {
           o.passed = true;
           combo++; comboTimer = 2.0;
+          addMission("dodge", 1);
           sfx("dodge");
           spawnSplash(duck.x, duck.y - 4, COL.foam, 4);
         }
@@ -477,12 +518,12 @@
     // Effekt beim Einsammeln eines Items
     function collectItem(type) {
       const ix = duck.x, iy = duck.y - 12;
-      if (type === "coin") { addScore(8, ix, iy, "#FFD93D"); runCoins += 1; sfx("coin"); spawnSplash(duck.x, duck.y, "#FFD93D", 7); }
+      if (type === "coin") { addScore(8, ix, iy, "#FFD93D"); runCoins += 1; addMission("coins", 1); sfx("coin"); spawnSplash(duck.x, duck.y, "#FFD93D", 7); }
       else if (type === "squeak") { addScore(15, ix, iy, COL.item); sfx("squeak"); spawnSplash(duck.x, duck.y, COL.item, 8); }
-      else if (type === "gem") { addScore(40, ix, iy, "#8fe9e2"); runCoins += 5; sfx("gem"); spawnSplash(duck.x, duck.y, "#8fe9e2", 12); }
+      else if (type === "gem") { addScore(40, ix, iy, "#8fe9e2"); runCoins += 5; addMission("gems", 1); sfx("gem"); spawnSplash(duck.x, duck.y, "#8fe9e2", 12); }
       else if (type === "shield") { duck.shield = true; combo++; comboTimer = 2.0; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 12); }
       else if (type === "turbo") { duck.turbo = 3.2; duck.invuln = 3.2; combo++; comboTimer = 2.0; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 12); }
-      else if (type === "magnet") { duck.magnet = 6; combo++; comboTimer = 2.0; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 10); }
+      else if (type === "magnet") { duck.magnet = 6; combo++; comboTimer = 2.0; addMission("magnet", 1); sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 10); }
       else if (type === "mega") { duck.mega = 5.5; duck.invuln = 5.5; sfx("mega"); shakeT = 0.3; spawnSplash(duck.x, duck.y, "#FFD93D", 18); }
     }
 
@@ -793,6 +834,16 @@
         ctx.fillText(PHASES[lastPhase].name, W / 2, 52);
         ctx.globalAlpha = 1;
       }
+
+      // Mission-geschafft-Hinweis
+      if (missionFlash > 0) {
+        ctx.globalAlpha = clamp(missionFlash, 0, 1);
+        ctx.fillStyle = COL.item;
+        ctx.textAlign = "center";
+        ctx.font = "bold 12px 'Trebuchet MS', sans-serif";
+        ctx.fillText("MISSION GESCHAFFT!", W / 2, 72);
+        ctx.globalAlpha = 1;
+      }
     }
 
     function drawStart() {
@@ -887,7 +938,20 @@
 
       ctx.fillStyle = COL.foam;
       ctx.font = "12px 'Trebuchet MS', sans-serif";
-      ctx.fillText("Tipp = nochmal", W / 2, 240);
+      ctx.fillText("Tipp = nochmal", W / 2, 236);
+
+      // aktive Missionen
+      ctx.fillStyle = "rgba(232,246,243,0.5)";
+      ctx.font = "bold 8px 'Trebuchet MS', sans-serif";
+      ctx.fillText("MISSIONEN", W / 2, 258);
+      ctx.font = "9px 'Trebuchet MS', sans-serif";
+      ctx.globalAlpha = 0.85;
+      for (let i = 0; i < missions.length; i++) {
+        const m = missions[i];
+        ctx.fillStyle = m.prog >= m.target ? COL.item : COL.foam;
+        ctx.fillText(m.text.replace("#", m.target) + " (" + Math.min(m.prog, m.target) + "/" + m.target + ")", W / 2, 272 + i * 13);
+      }
+      ctx.globalAlpha = 1;
     }
 
     // Enten-Shop: Skins kaufen/auswaehlen
