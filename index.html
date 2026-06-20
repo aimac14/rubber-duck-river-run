@@ -104,6 +104,14 @@
       "Der Bug war die Ente", "404: Ufer not found", "Quack & crash",
     ];
 
+    // Schwierigkeitsstufen: Start-Tempo, Tempo-Anstieg, max. Zusatz-Tempo, Spawn-Intervall
+    const DIFFS = {
+      easy:   { label: "LEICHT", base: 56, ramp: 0.009, maxAdd: 120, spawnMax: 1.40 },
+      normal: { label: "NORMAL", base: 70, ramp: 0.012, maxAdd: 160, spawnMax: 1.15 },
+      hard:   { label: "SCHWER", base: 88, ramp: 0.017, maxAdd: 205, spawnMax: 0.92 },
+    };
+    let diffKey = localStorage.getItem("rdrr_diff") || "normal";
+
     // Die Ente bleibt vertikal etwa mittig, Welt scrollt an ihr vorbei
     // shield = Seifenblase aktiv, turbo/invuln = Restzeit in Sekunden
     const duck = { x: W / 2, y: H * 0.64, targetX: W / 2, tilt: 0, vx: 0, shield: false, turbo: 0, invuln: 0 };
@@ -113,21 +121,6 @@
     const items = [];          // Quietsche-Collectibles + Power-ups
     const whirls = [];         // Whirlpools (Sog)
     const particles = [];
-
-    // Schaum-Streifen fuer die Wasser-Animation
-    let foam = [];
-    function initFoam() {
-      foam = [];
-      for (let i = 0; i < 14; i++) {
-        foam.push({
-          x: Math.random() * W,
-          y: Math.random() * H,
-          w: 6 + Math.random() * 14,
-          deep: Math.random() < 0.4,   // dunklere Tiefe-Streifen
-        });
-      }
-    }
-    initFoam();
 
     // ================================================================
     // === SPRITES (generierte Grafik, mit Pixel-Fallback) ============
@@ -173,9 +166,14 @@
 
     // Sound-Effekte
     function sfx(kind) {
-      if (kind === "squeak") tone(700, 1300, 0.09, "square", 0.16);          // Quietsche eingesammelt
+      if (kind === "squeak") tone(700, 1300, 0.09, "square", 0.16);          // Quietsche
+      else if (kind === "coin") tone(900, 1500, 0.07, "square", 0.12);       // Muenze
+      else if (kind === "gem") { tone(800, 0, 0.07, "triangle", 0.13); setTimeout(() => tone(1200, 0, 0.09, "triangle", 0.13), 55); setTimeout(() => tone(1650, 0, 0.12, "triangle", 0.13), 120); } // Diamant
       else if (kind === "dodge") tone(480, 720, 0.05, "triangle", 0.07);     // knapp ausgewichen
-      else if (kind === "power") { tone(523, 0, 0.08, "square", 0.13); setTimeout(() => tone(784, 0, 0.12, "square", 0.13), 70); } // Power-up
+      else if (kind === "power") { tone(523, 0, 0.08, "square", 0.13); setTimeout(() => tone(784, 0, 0.12, "square", 0.13), 70); } // Schild/Turbo
+      else if (kind === "mega") { tone(330, 0, 0.1, "sawtooth", 0.16); setTimeout(() => tone(523, 0, 0.1, "sawtooth", 0.16), 90); setTimeout(() => tone(880, 0, 0.2, "sawtooth", 0.16), 180); } // Riesen-Ente
+      else if (kind === "smash") tone(170, 55, 0.12, "sawtooth", 0.17);      // Hindernis zerschmettert
+      else if (kind === "start") { tone(500, 0, 0.07, "square", 0.1); setTimeout(() => tone(760, 0, 0.1, "square", 0.1), 75); } // Spielstart
       else if (kind === "over") tone(320, 80, 0.5, "sawtooth", 0.18);        // Game-Over (tief)
     }
 
@@ -195,15 +193,22 @@
     function onDown(e) {
       e.preventDefault();
       initAudio();
+      const mx = pointerX(e), my = pointerY(e);
       // Mute-Button oben rechts angetippt?
-      if (pointerX(e) > W - 24 && pointerY(e) < 22) {
+      if (mx > W - 24 && my < 22) {
         muted = !muted;
         localStorage.setItem("rdrr_muted", muted ? "1" : "0");
         return;
       }
+      // Schwierigkeit-Auswahl am Start-Screen?
+      if (state === STATE.START && my > 258 && my < 282) {
+        diffKey = mx < 62 ? "easy" : mx < 120 ? "normal" : "hard";
+        localStorage.setItem("rdrr_diff", diffKey);
+        return;
+      }
       if (state === STATE.START) { startGame(); }
       else if (state === STATE.OVER) { startGame(); }
-      duck.targetX = clamp(pointerX(e), 8, W - 8);
+      duck.targetX = clamp(mx, 8, W - 8);
     }
     function onMove(e) {
       if (state !== STATE.PLAY) return;
@@ -218,6 +223,7 @@
     // ================================================================
     function startGame() {
       state = STATE.PLAY;
+      sfx("start");
       score = 0;
       dist = 0;
       speed = 70;                 // sanfter Start (erste Sekunden leicht)
@@ -282,8 +288,9 @@
       if (duck.turbo > 0) duck.turbo -= dt;
       if (duck.invuln > 0) duck.invuln -= dt;
 
-      // Schwierigkeit: Tempo steigt langsam mit der Distanz; Turbo beschleunigt
-      const base = 70 + Math.min(160, dist * 0.012);
+      // Schwierigkeit: Tempo steigt mit der Distanz (je nach Stufe); Turbo beschleunigt
+      const d = DIFFS[diffKey];
+      const base = d.base + Math.min(d.maxAdd, dist * d.ramp);
       speed = duck.turbo > 0 ? base * 1.7 : base;
       dist += speed * dt;
       score = Math.floor(dist / 10) + bonus;
@@ -295,18 +302,14 @@
       duck.vx = dx;
       duck.tilt += ((clamp(dx * 0.12, -0.35, 0.35)) - duck.tilt) * Math.min(1, dt * 10);
 
-      // Wasser-Animation scrollt nach unten (modulo Textur-Hoehe = W)
+      // Wasser-Textur scrollt nach unten (modulo Textur-Hoehe = W)
       scrollY = (scrollY + speed * dt) % W;
-      for (const f of foam) {
-        f.y += speed * dt;
-        if (f.y > H) { f.y -= H; f.x = Math.random() * W; }
-      }
 
       // Hindernisse spawnen (Rate steigt langsam mit der Distanz)
       spawnTimer -= dt;
       if (spawnTimer <= 0) {
         spawnObstacle();
-        spawnTimer = clamp(1.15 - dist * 0.00007, 0.5, 1.15);
+        spawnTimer = clamp(DIFFS[diffKey].spawnMax - dist * 0.00007, 0.45, DIFFS[diffKey].spawnMax);
       }
 
       // Hindernisse bewegen, Kollision pruefen, aufraeumen
@@ -431,13 +434,6 @@
         ctx.fillStyle = COL.water;
         ctx.fillRect(0, 0, W, H);
       }
-      // dezente Schaum-Streifen (Bewegung + kaschieren die Kachel-Naht)
-      for (const f of foam) {
-        ctx.fillStyle = f.deep ? COL.waterDeep : COL.foam;
-        ctx.globalAlpha = f.deep ? 0.28 : 0.42;
-        ctx.fillRect(Math.round(f.x), Math.round(f.y), f.w, 2);
-      }
-      ctx.globalAlpha = 1;
     }
 
     // Pixel-Helfer
@@ -617,30 +613,46 @@
 
       ctx.fillStyle = COL.duck;
       ctx.font = "bold 20px 'Trebuchet MS', sans-serif";
-      ctx.fillText("RUBBER DUCK", W / 2, 84);
-      ctx.fillText("RIVER RUN", W / 2, 108);
+      ctx.fillText("RUBBER DUCK", W / 2, 78);
+      ctx.fillText("RIVER RUN", W / 2, 102);
 
       ctx.fillStyle = COL.foam;
       ctx.globalAlpha = 0.7;
       ctx.font = "italic 9px 'Trebuchet MS', sans-serif";
-      ctx.fillText("Rubber-Duck-Debugging als Sport", W / 2, 124);
+      ctx.fillText("Rubber-Duck-Debugging als Sport", W / 2, 118);
       ctx.globalAlpha = 1;
 
-      // prominente Hero-Ente, knallgelb ueber dem Panel
+      // prominente Hero-Ente ueber dem Panel
       ctx.save();
-      ctx.translate(W / 2, 158);
-      ctx.scale(1.6, 1.6);
+      ctx.translate(W / 2, 150);
+      ctx.scale(1.5, 1.5);
       drawDuckSprite();
       ctx.restore();
 
       ctx.fillStyle = COL.foam;
       ctx.font = "12px 'Trebuchet MS', sans-serif";
-      ctx.fillText("Tipp = Start", W / 2, 212);
-      ctx.fillText("Finger ziehen = lenken", W / 2, 230);
+      ctx.fillText("Tipp = Start", W / 2, 190);
+      ctx.fillText("Finger ziehen = lenken", W / 2, 206);
 
       ctx.fillStyle = COL.item;
-      ctx.font = "bold 12px 'Trebuchet MS', sans-serif";
-      ctx.fillText("Best: " + best, W / 2, 262);
+      ctx.font = "bold 11px 'Trebuchet MS', sans-serif";
+      ctx.fillText("Best: " + best, W / 2, 228);
+
+      // Schwierigkeit-Auswahl (antippbare Pillen)
+      ctx.fillStyle = COL.foam; ctx.globalAlpha = 0.7;
+      ctx.font = "9px 'Trebuchet MS', sans-serif";
+      ctx.fillText("Schwierigkeit", W / 2, 250);
+      ctx.globalAlpha = 1;
+      const dkeys = ["easy", "normal", "hard"];
+      const dcx = [33, 90, 147];
+      ctx.font = "bold 9px 'Trebuchet MS', sans-serif";
+      for (let i = 0; i < 3; i++) {
+        const sel = dkeys[i] === diffKey;
+        ctx.fillStyle = sel ? COL.item : "rgba(232,246,243,0.18)";
+        ctx.beginPath(); ctx.roundRect(dcx[i] - 25, 262, 50, 16, 8); ctx.fill();
+        ctx.fillStyle = sel ? "#0c2b29" : COL.foam;
+        ctx.fillText(DIFFS[dkeys[i]].label, dcx[i], 273);
+      }
     }
 
     function drawGameOver() {
