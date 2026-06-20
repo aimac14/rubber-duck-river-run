@@ -81,10 +81,23 @@
     // ================================================================
     // === SPIELZUSTAND ===============================================
     // ================================================================
-    const STATE = { START: "start", PLAY: "play", OVER: "over" };
+    const STATE = { START: "start", PLAY: "play", OVER: "over", SHOP: "shop" };
     let state = STATE.START;
 
     let best = +(localStorage.getItem("rdrr_best") || 0);
+    let coins = +(localStorage.getItem("rdrr_coins") || 0);   // persistentes Muenzen-Konto
+    let runCoins = 0;                                         // im aktuellen Lauf gesammelt
+
+    // Enten-Skins (im Shop kaufbar)
+    const DUCKS = [
+      { key: "duck", name: "Klassik", price: 0 },
+      { key: "duck_detective", name: "Detektiv", price: 30 },
+      { key: "duck_pirate", name: "Pirat", price: 60 },
+      { key: "duck_robot", name: "Roboter", price: 100 },
+      { key: "duck_unicorn", name: "Einhorn", price: 150 },
+    ];
+    let owned = JSON.parse(localStorage.getItem("rdrr_owned") || '["duck"]');
+    let selDuck = localStorage.getItem("rdrr_duck") || "duck";
     let score = 0;
     let dist = 0;            // zurueckgelegte Distanz (treibt Score & Tempo)
     let speed = 0;           // aktuelle Scroll-Geschwindigkeit (px/s)
@@ -219,6 +232,32 @@
         localStorage.setItem("rdrr_muted", muted ? "1" : "0");
         return;
       }
+      // Shop-Screen: Auswahl/Kauf + Zurueck
+      if (state === STATE.SHOP) {
+        if (my > 290) { state = STATE.START; return; }
+        for (let i = 0; i < DUCKS.length; i++) {
+          const y = 64 + i * 40;
+          if (my >= y && my <= y + 34) {
+            const d = DUCKS[i];
+            if (owned.includes(d.key)) {
+              selDuck = d.key; localStorage.setItem("rdrr_duck", selDuck);
+            } else if (coins >= d.price) {
+              coins -= d.price; owned.push(d.key); selDuck = d.key;
+              localStorage.setItem("rdrr_coins", String(coins));
+              localStorage.setItem("rdrr_owned", JSON.stringify(owned));
+              localStorage.setItem("rdrr_duck", selDuck);
+              sfx("coin");
+            }
+            return;
+          }
+        }
+        return;
+      }
+      // Shop-Button am Start-Screen?
+      if (state === STATE.START && mx > 6 && mx < 56 && my > 6 && my < 28) {
+        state = STATE.SHOP;
+        return;
+      }
       // Schwierigkeit-Auswahl am Start-Screen?
       if (state === STATE.START && my > 258 && my < 282) {
         diffKey = mx < 62 ? "easy" : mx < 120 ? "normal" : "hard";
@@ -254,6 +293,7 @@
       whirls.length = 0;
       particles.length = 0;
       bonus = 0;
+      runCoins = 0;
       combo = 0;
       comboTimer = 0;
       popups.length = 0;
@@ -437,9 +477,9 @@
     // Effekt beim Einsammeln eines Items
     function collectItem(type) {
       const ix = duck.x, iy = duck.y - 12;
-      if (type === "coin") { addScore(8, ix, iy, "#FFD93D"); sfx("coin"); spawnSplash(duck.x, duck.y, "#FFD93D", 7); }
+      if (type === "coin") { addScore(8, ix, iy, "#FFD93D"); runCoins += 1; sfx("coin"); spawnSplash(duck.x, duck.y, "#FFD93D", 7); }
       else if (type === "squeak") { addScore(15, ix, iy, COL.item); sfx("squeak"); spawnSplash(duck.x, duck.y, COL.item, 8); }
-      else if (type === "gem") { addScore(40, ix, iy, "#8fe9e2"); sfx("gem"); spawnSplash(duck.x, duck.y, "#8fe9e2", 12); }
+      else if (type === "gem") { addScore(40, ix, iy, "#8fe9e2"); runCoins += 5; sfx("gem"); spawnSplash(duck.x, duck.y, "#8fe9e2", 12); }
       else if (type === "shield") { duck.shield = true; combo++; comboTimer = 2.0; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 12); }
       else if (type === "turbo") { duck.turbo = 3.2; duck.invuln = 3.2; combo++; comboTimer = 2.0; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 12); }
       else if (type === "magnet") { duck.magnet = 6; combo++; comboTimer = 2.0; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 10); }
@@ -500,6 +540,8 @@
       shakeT = 0.4;
       spawnSplash(duck.x, duck.y, COL.foam, 16);
       gameOverMsg = QUACKS[Math.floor(Math.random() * QUACKS.length)];
+      coins += runCoins;
+      localStorage.setItem("rdrr_coins", String(coins));
       newBest = score > best;
       if (newBest) {
         best = score;
@@ -648,9 +690,10 @@
 
     // Enten-Sprite um den Ursprung (0,0) — wiederverwendbar (Spiel + Start-Screen)
     function drawDuckSprite() {
-      if (imgReady(IMG.duck)) {
+      const dimg = IMG[selDuck] || IMG.duck;
+      if (imgReady(dimg)) {
         const s = 40;   // generiertes Enten-Sprite (etwas groesser wegen transparentem Rand)
-        ctx.drawImage(IMG.duck, -s / 2, -s / 2, s, s);
+        ctx.drawImage(dimg, -s / 2, -s / 2, s, s);
         return;
       }
       // Fallback: Pixel-Ente
@@ -756,6 +799,18 @@
       // halbtransparentes Panel
       ctx.fillStyle = "rgba(12,43,41,0.55)";
       ctx.fillRect(0, 0, W, H);
+
+      // Shop-Button + Muenzen-Konto oben links
+      ctx.fillStyle = COL.item;
+      ctx.beginPath(); ctx.roundRect(8, 8, 46, 18, 9); ctx.fill();
+      ctx.fillStyle = "#0c2b29"; ctx.textAlign = "center";
+      ctx.font = "bold 10px 'Trebuchet MS', sans-serif";
+      ctx.fillText("SHOP", 31, 21);
+      if (imgReady(IMG.coin)) ctx.drawImage(IMG.coin, 62, 8, 16, 16);
+      ctx.fillStyle = COL.foam; ctx.textAlign = "left";
+      ctx.font = "bold 12px 'Trebuchet MS', sans-serif";
+      ctx.fillText(String(coins), 80, 21);
+
       ctx.textAlign = "center";
 
       ctx.fillStyle = COL.duck;
@@ -835,6 +890,44 @@
       ctx.fillText("Tipp = nochmal", W / 2, 240);
     }
 
+    // Enten-Shop: Skins kaufen/auswaehlen
+    function drawShop() {
+      ctx.fillStyle = "rgba(10,30,28,0.93)";
+      ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = "center";
+
+      ctx.fillStyle = COL.duck;
+      ctx.font = "bold 17px 'Trebuchet MS', sans-serif";
+      ctx.fillText("ENTEN-SHOP", W / 2, 26);
+
+      // Muenzen-Konto
+      if (imgReady(IMG.coin)) ctx.drawImage(IMG.coin, W / 2 - 28, 35, 15, 15);
+      ctx.fillStyle = COL.foam; ctx.textAlign = "left";
+      ctx.font = "bold 13px 'Trebuchet MS', sans-serif";
+      ctx.fillText(String(coins), W / 2 - 10, 47);
+
+      // Enten-Liste
+      for (let i = 0; i < DUCKS.length; i++) {
+        const d = DUCKS[i], y = 64 + i * 40;
+        const isOwned = owned.includes(d.key), isSel = selDuck === d.key;
+        ctx.fillStyle = isSel ? "rgba(255,93,162,0.28)" : "rgba(232,246,243,0.07)";
+        ctx.beginPath(); ctx.roundRect(12, y, W - 24, 34, 8); ctx.fill();
+        if (imgReady(IMG[d.key])) ctx.drawImage(IMG[d.key], 16, y + 2, 30, 30);
+        ctx.fillStyle = COL.foam; ctx.textAlign = "left";
+        ctx.font = "bold 11px 'Trebuchet MS', sans-serif";
+        ctx.fillText(d.name, 52, y + 21);
+        ctx.textAlign = "right";
+        ctx.font = "bold 10px 'Trebuchet MS', sans-serif";
+        if (isSel) { ctx.fillStyle = COL.item; ctx.fillText("GEWAEHLT", W - 20, y + 21); }
+        else if (isOwned) { ctx.fillStyle = COL.foam; ctx.fillText("WAEHLEN", W - 20, y + 21); }
+        else { ctx.fillStyle = coins >= d.price ? COL.duck : "rgba(232,246,243,0.4)"; ctx.fillText(d.price + " Mz", W - 20, y + 21); }
+      }
+
+      ctx.fillStyle = COL.foam; ctx.textAlign = "center";
+      ctx.font = "bold 11px 'Trebuchet MS', sans-serif";
+      ctx.fillText("< ZURUECK", W / 2, 302);
+    }
+
     // Mute-Button oben rechts: glatter Lautsprecher + Schallwellen (an) bzw. pinkes X (stumm)
     function drawMuteButton() {
       const cx = W - 15, cy = 12;
@@ -883,7 +976,7 @@
       for (const o of obstacles) drawObstacle(o);
       for (const it of items) drawItem(it);
       // fahrende Ente nur im Spiel / Game-Over (Start zeigt eigene Hero-Ente)
-      if (state !== STATE.START) drawDuck();
+      if (state === STATE.PLAY || state === STATE.OVER) drawDuck();
       drawParticles();
       drawPopups();
       drawTint();
@@ -893,6 +986,7 @@
       if (state === STATE.PLAY) drawHUD();
       if (state === STATE.START) drawStart();
       if (state === STATE.OVER) drawGameOver();
+      if (state === STATE.SHOP) drawShop();
       drawMuteButton();   // immer sichtbar (alle States)
     }
 
