@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="theme-color" content="#2A7E78" />
   <title>Rubber Duck River Run</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E🦆%3C/text%3E%3C/svg%3E" />
   <style>
     /* === LAYOUT (mobile, portrait, fullscreen) === */
     html, body {
@@ -191,18 +192,8 @@
     // Pixel-Helfer
     function px(x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x, y, w, h); }
 
-    // Gummiente von oben (top-down), Schnabel zeigt nach vorn (oben)
-    function drawDuck() {
-      // Wasser-Schatten (unrotiert, gibt Tiefe)
-      ctx.fillStyle = "rgba(0,0,0,0.16)";
-      ctx.beginPath();
-      ctx.ellipse(duck.x, duck.y + 7, 11, 5, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.save();
-      ctx.translate(Math.round(duck.x), Math.round(duck.y));
-      ctx.rotate(duck.tilt);
-
+    // Enten-Sprite um den Ursprung (0,0) — wiederverwendbar (Spiel + Start-Screen)
+    function drawDuckSprite() {
       // Koerper (gelbes Oval aus Bloecken)
       px(-6, -8, 12, 2, COL.duck);
       px(-8, -6, 16, 4, COL.duck);
@@ -218,7 +209,19 @@
       // Augen
       px(-3, -12, 1, 1, "#1a1a1a");
       px( 2, -12, 1, 1, "#1a1a1a");
+    }
 
+    // Gummiente von oben (top-down): Wasser-Schatten + Position + Neigung
+    function drawDuck() {
+      ctx.fillStyle = "rgba(0,0,0,0.16)";
+      ctx.beginPath();
+      ctx.ellipse(duck.x, duck.y + 7, 11, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.save();
+      ctx.translate(Math.round(duck.x), Math.round(duck.y));
+      ctx.rotate(duck.tilt);
+      drawDuckSprite();
       ctx.restore();
     }
 
@@ -239,17 +242,24 @@
 
       ctx.fillStyle = COL.duck;
       ctx.font = "bold 20px 'Trebuchet MS', sans-serif";
-      ctx.fillText("RUBBER DUCK", W / 2, 92);
-      ctx.fillText("RIVER RUN", W / 2, 116);
+      ctx.fillText("RUBBER DUCK", W / 2, 84);
+      ctx.fillText("RIVER RUN", W / 2, 108);
+
+      // prominente Hero-Ente, knallgelb ueber dem Panel
+      ctx.save();
+      ctx.translate(W / 2, 158);
+      ctx.scale(1.6, 1.6);
+      drawDuckSprite();
+      ctx.restore();
 
       ctx.fillStyle = COL.foam;
       ctx.font = "12px 'Trebuchet MS', sans-serif";
-      ctx.fillText("Tipp = Start", W / 2, 168);
-      ctx.fillText("Finger ziehen = lenken", W / 2, 186);
+      ctx.fillText("Tipp = Start", W / 2, 212);
+      ctx.fillText("Finger ziehen = lenken", W / 2, 230);
 
       ctx.fillStyle = COL.item;
       ctx.font = "bold 12px 'Trebuchet MS', sans-serif";
-      ctx.fillText("Best: " + best, W / 2, 226);
+      ctx.fillText("Best: " + best, W / 2, 262);
     }
 
     function render() {
@@ -259,7 +269,8 @@
       for (const o of obstacles) { /* Stufe 2 */ }
       for (const it of items) { /* Stufe 3 */ }
 
-      drawDuck();
+      // fahrende Ente nur im Spiel / Game-Over (Start zeigt eigene Hero-Ente)
+      if (state !== STATE.START) drawDuck();
 
       if (state === STATE.PLAY) drawHUD();
       if (state === STATE.START) drawStart();
