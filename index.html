@@ -81,7 +81,7 @@
     // ================================================================
     // === SPIELZUSTAND ===============================================
     // ================================================================
-    const STATE = { START: "start", PLAY: "play", OVER: "over", SHOP: "shop" };
+    const STATE = { START: "start", PLAY: "play", OVER: "over", SHOP: "shop", PAUSE: "pause" };
     let state = STATE.START;
 
     let best = +(localStorage.getItem("rdrr_best") || 0);
@@ -277,6 +277,17 @@
         muted = !muted;
         localStorage.setItem("rdrr_muted", muted ? "1" : "0");
         return;
+      }
+      // Pause-Button (nur im laufenden Spiel, links vom Mute) -> pausieren
+      if (state === STATE.PLAY && mx > W - 46 && mx < W - 25 && my < 22) {
+        state = STATE.PAUSE;
+        return;
+      }
+      // Pause-Screen: Weiter oder Spiel beenden
+      if (state === STATE.PAUSE) {
+        if (my > 150 && my < 178) { state = STATE.PLAY; return; }   // Weiter
+        if (my > 190 && my < 218) { endRun(); return; }             // Spiel beenden
+        return;                                                     // Tap ins Leere ignorieren
       }
       // Shop-Screen: Auswahl/Kauf + Zurueck
       if (state === STATE.SHOP) {
@@ -1126,6 +1137,55 @@
       ctx.restore();
     }
 
+    // === PAUSE / SPIEL BEENDEN ===
+    // Lauf beenden: Muenzen + Highscore sichern, zurueck zum Start-Screen
+    function endRun() {
+      coins += runCoins;
+      localStorage.setItem("rdrr_coins", String(coins));
+      if (score > best) { best = score; localStorage.setItem("rdrr_best", String(best)); }
+      state = STATE.START;
+    }
+
+    // Pause-Button (zwei Balken) links vom Mute-Button, nur im Spiel
+    function drawPauseButton() {
+      const cx = W - 35, cy = 12;
+      ctx.save();
+      ctx.globalAlpha = 0.95;
+      ctx.fillStyle = COL.foam;
+      ctx.fillRect(cx - 3, cy - 5, 2.5, 10);
+      ctx.fillRect(cx + 2, cy - 5, 2.5, 10);
+      ctx.restore();
+    }
+
+    // Pause-Overlay: Weiter oder Spiel beenden
+    function drawPause() {
+      ctx.fillStyle = "rgba(10,30,28,0.74)";
+      ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = "center";
+
+      ctx.fillStyle = COL.foam;
+      ctx.font = "bold 21px 'Trebuchet MS', sans-serif";
+      ctx.fillText("PAUSE", W / 2, 92);
+
+      ctx.fillStyle = COL.duck;
+      ctx.font = "bold 15px 'Trebuchet MS', sans-serif";
+      ctx.fillText("Score: " + score, W / 2, 120);
+
+      // Weiter-Button (Signalfarbe)
+      ctx.fillStyle = COL.item;
+      ctx.beginPath(); ctx.roundRect(W / 2 - 58, 150, 116, 28, 14); ctx.fill();
+      ctx.fillStyle = "#0c2b29";
+      ctx.font = "bold 13px 'Trebuchet MS', sans-serif";
+      ctx.fillText("WEITER", W / 2, 169);
+
+      // Beenden-Button (dezent)
+      ctx.fillStyle = "rgba(232,246,243,0.16)";
+      ctx.beginPath(); ctx.roundRect(W / 2 - 58, 190, 116, 28, 14); ctx.fill();
+      ctx.fillStyle = COL.foam;
+      ctx.font = "bold 13px 'Trebuchet MS', sans-serif";
+      ctx.fillText("BEENDEN", W / 2, 209);
+    }
+
     function render() {
       ctx.setTransform(S, 0, 0, S, 0, 0);   // Basis: 180x320-Logik, scharf hochskaliert
       ctx.save();
@@ -1139,18 +1199,19 @@
       for (const wp of whirls) drawWhirl(wp);
       for (const o of obstacles) drawObstacle(o);
       for (const it of items) drawItem(it);
-      // fahrende Ente nur im Spiel / Game-Over (Start zeigt eigene Hero-Ente)
-      if (state === STATE.PLAY || state === STATE.OVER) drawDuck();
+      // fahrende Ente im Spiel / Game-Over / Pause (Start zeigt eigene Hero-Ente)
+      if (state === STATE.PLAY || state === STATE.OVER || state === STATE.PAUSE) drawDuck();
       drawParticles();
       drawPopups();
       drawTint();
       ctx.restore();
 
       // HUD & Overlays ohne Shake (bleiben ruhig lesbar)
-      if (state === STATE.PLAY) drawHUD();
+      if (state === STATE.PLAY) { drawHUD(); drawPauseButton(); }
       if (state === STATE.START) drawStart();
       if (state === STATE.OVER) drawGameOver();
       if (state === STATE.SHOP) drawShop();
+      if (state === STATE.PAUSE) drawPause();
       drawMuteButton();   // immer sichtbar (alle States)
     }
 
