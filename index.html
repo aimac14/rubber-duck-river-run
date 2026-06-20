@@ -88,6 +88,8 @@
     let dist = 0;            // zurueckgelegte Distanz (treibt Score & Tempo)
     let speed = 0;           // aktuelle Scroll-Geschwindigkeit (px/s)
     let scrollY = 0;         // Versatz fuer Hintergrund-Wellen
+    let newBest = false;     // im aktuellen Lauf neuer Rekord erzielt?
+    let spawnTimer = 0;      // Countdown bis zum naechsten Hindernis (s)
 
     // Die Ente bleibt vertikal etwa mittig, Welt scrollt an ihr vorbei
     const duck = { x: W / 2, y: H * 0.64, targetX: W / 2, tilt: 0 };
@@ -149,6 +151,30 @@
       obstacles.length = 0;
       items.length = 0;
       particles.length = 0;
+      newBest = false;
+      spawnTimer = 1.4;           // erste ~1,5s bewusst ruhig (fairer Start)
+    }
+
+    // ================================================================
+    // === SPAWNING (Hindernisse von oben) ============================
+    // ================================================================
+    function spawnObstacle() {
+      if (Math.random() < 0.55) {
+        // Felsen: kompakt, etwas unregelmaessig
+        const s = 13 + Math.random() * 11;
+        obstacles.push({
+          type: "rock", x: 12 + Math.random() * (W - 24), y: -s,
+          w: s, h: s, rot: 0, rotSpeed: 0,
+        });
+      } else {
+        // Treibholz: breiter Balken, leichte Drehung
+        const w = 34 + Math.random() * 38;
+        obstacles.push({
+          type: "log", x: w / 2 + Math.random() * (W - w), y: -12,
+          w: w, h: 11, rot: (Math.random() - 0.5) * 0.2,
+          rotSpeed: (Math.random() - 0.5) * 0.25,
+        });
+      }
     }
 
     // ================================================================
@@ -172,6 +198,38 @@
         f.y += speed * dt;
         if (f.y > H) { f.y -= H; f.x = Math.random() * W; }
       }
+
+      // Hindernisse spawnen (Rate steigt langsam mit der Distanz)
+      spawnTimer -= dt;
+      if (spawnTimer <= 0) {
+        spawnObstacle();
+        spawnTimer = clamp(1.15 - dist * 0.00007, 0.5, 1.15);
+      }
+
+      // Hindernisse bewegen, Kollision pruefen, aufraeumen
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        const o = obstacles[i];
+        o.y += speed * dt;
+        o.rot += o.rotSpeed * dt;
+        // Hitbox etwas kleiner als Sprite -> fair zum Spieler
+        if (hitCircleRect(duck.x, duck.y, 7, o.x - o.w / 2, o.y - o.h / 2, o.w, o.h)) {
+          gameOver();
+          return;
+        }
+        if (o.y - o.h > H + 20) obstacles.splice(i, 1);
+      }
+    }
+
+    // ================================================================
+    // === GAME-OVER ==================================================
+    // ================================================================
+    function gameOver() {
+      state = STATE.OVER;
+      newBest = score > best;
+      if (newBest) {
+        best = score;
+        localStorage.setItem("rdrr_best", String(best));
+      }
     }
 
     // ================================================================
@@ -191,6 +249,34 @@
 
     // Pixel-Helfer
     function px(x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x, y, w, h); }
+
+    // Felsen / Treibholz als Pixel-Sprite
+    function drawObstacle(o) {
+      ctx.save();
+      ctx.translate(Math.round(o.x), Math.round(o.y));
+
+      if (o.type === "rock") {
+        const r = o.w / 2;
+        // kompakter, leicht unregelmaessiger Block
+        px(-r, -r + 2, o.w, o.h - 4, COL.obstacle);
+        px(-r + 2, -r, o.w - 4, o.h, COL.obstacle);
+        // Gischt-Highlight oben-links
+        ctx.globalAlpha = 0.5; px(-r + 3, -r + 1, 3, 2, COL.foam); ctx.globalAlpha = 1;
+        // Schatten-Kante unten
+        ctx.fillStyle = "rgba(0,0,0,0.22)"; ctx.fillRect(-r + 2, r - 4, o.w - 4, 2);
+      } else {
+        ctx.rotate(o.rot);
+        const w = o.w, h = o.h;
+        px(-w / 2, -h / 2, w, h, COL.obstacle);
+        // Maserung (abgedunkelt)
+        ctx.fillStyle = "rgba(0,0,0,0.22)";
+        ctx.fillRect(-w / 2 + 2, -1, w - 4, 1);
+        ctx.fillRect(-w / 2 + 4, -h / 2 + 2, w - 8, 1);
+        // nasse Kante (Highlight)
+        ctx.globalAlpha = 0.4; px(-w / 2 + 1, h / 2 - 2, w - 2, 1, COL.foam); ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+    }
 
     // Enten-Sprite um den Ursprung (0,0) — wiederverwendbar (Spiel + Start-Screen)
     function drawDuckSprite() {
@@ -262,18 +348,46 @@
       ctx.fillText("Best: " + best, W / 2, 262);
     }
 
+    function drawGameOver() {
+      ctx.fillStyle = "rgba(10,30,28,0.72)";
+      ctx.fillRect(0, 0, W, H);
+      ctx.textAlign = "center";
+
+      ctx.fillStyle = COL.foam;
+      ctx.font = "bold 22px 'Trebuchet MS', sans-serif";
+      ctx.fillText("GAME OVER", W / 2, 112);
+
+      ctx.fillStyle = COL.duck;
+      ctx.font = "bold 30px 'Trebuchet MS', sans-serif";
+      ctx.fillText(String(score), W / 2, 158);
+
+      if (newBest) {
+        ctx.fillStyle = COL.item;
+        ctx.font = "bold 13px 'Trebuchet MS', sans-serif";
+        ctx.fillText("NEW BEST!", W / 2, 184);
+      } else {
+        ctx.fillStyle = COL.foam;
+        ctx.font = "12px 'Trebuchet MS', sans-serif";
+        ctx.fillText("Best: " + best, W / 2, 184);
+      }
+
+      ctx.fillStyle = COL.foam;
+      ctx.font = "12px 'Trebuchet MS', sans-serif";
+      ctx.fillText("Tipp = nochmal", W / 2, 240);
+    }
+
     function render() {
       drawWater();
 
-      // (Hindernisse / Items folgen in spaeteren Stufen)
-      for (const o of obstacles) { /* Stufe 2 */ }
-      for (const it of items) { /* Stufe 3 */ }
+      for (const o of obstacles) drawObstacle(o);
+      for (const it of items) { /* Items folgen in Stufe 3 */ }
 
       // fahrende Ente nur im Spiel / Game-Over (Start zeigt eigene Hero-Ente)
       if (state !== STATE.START) drawDuck();
 
       if (state === STATE.PLAY) drawHUD();
       if (state === STATE.START) drawStart();
+      if (state === STATE.OVER) drawGameOver();
     }
 
     // ================================================================
@@ -293,6 +407,14 @@
     // === HILFSFUNKTIONEN ============================================
     // ================================================================
     function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+    // Kollision: Kreis (Ente) gegen Rechteck (Hindernis-Hitbox)
+    function hitCircleRect(cx, cy, r, rx, ry, rw, rh) {
+      const nx = clamp(cx, rx, rx + rw);
+      const ny = clamp(cy, ry, ry + rh);
+      const dx = cx - nx, dy = cy - ny;
+      return dx * dx + dy * dy < r * r;
+    }
   })();
   </script>
 </body>
