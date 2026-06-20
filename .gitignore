@@ -9,3 +9,4 @@ build/
 # lokale Test-/Editor-Artefakte
 .playwright-mcp/
 .claude/
+.vercel
