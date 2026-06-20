@@ -96,6 +96,9 @@
     let bonus = 0;           // Bonuspunkte aus eingesammelten Quietschern
     let shakeT = 0;          // Screen-Shake-Restzeit (s)
     let gameOverMsg = "";    // Debugging-Spruch fuer den Game-Over-Screen
+    let combo = 0;           // aktuelle Combo (schnelle Pickups/Dodges)
+    let comboTimer = 0;      // Restzeit der Combo (s)
+    const popups = [];       // Floating-Score-Texte
 
     // Rubber-Duck-Debugging-Sprueche (Gruss an die Coding-Jury)
     const QUACKS = [
@@ -237,6 +240,9 @@
       whirls.length = 0;
       particles.length = 0;
       bonus = 0;
+      combo = 0;
+      comboTimer = 0;
+      popups.length = 0;
       duck.shield = false;
       duck.turbo = 0;
       duck.invuln = 0;
@@ -297,6 +303,7 @@
       if (duck.turbo > 0) duck.turbo -= dt;
       if (duck.invuln > 0) duck.invuln -= dt;
       if (duck.mega > 0) duck.mega -= dt;
+      if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) combo = 0; }
 
       // Schwierigkeit: Tempo steigt mit der Distanz (je nach Stufe); Turbo beschleunigt
       const d = DIFFS[diffKey];
@@ -333,7 +340,7 @@
           if (duck.mega > 0) {
             // Riesen-Ente smasht das Hindernis weg
             spawnSplash(o.x, o.y, COL.obstacle, 12);
-            bonus += 5;
+            addScore(5, o.x, o.y - 8, COL.foam);
             sfx("smash");
             shakeT = Math.max(shakeT, 0.12);
             obstacles.splice(i, 1);
@@ -357,6 +364,7 @@
         // knapp ausgewichen? -> Dodge-Sound + kleiner Spritzer (einmal pro Hindernis)
         if (!o.passed && o.y > duck.y && Math.abs(o.x - duck.x) < o.w / 2 + 13) {
           o.passed = true;
+          combo++; comboTimer = 2.0;
           sfx("dodge");
           spawnSplash(duck.x, duck.y - 4, COL.foam, 4);
         }
@@ -399,11 +407,12 @@
 
     // Effekt beim Einsammeln eines Items
     function collectItem(type) {
-      if (type === "coin") { bonus += 8; sfx("coin"); spawnSplash(duck.x, duck.y, "#FFD93D", 7); }
-      else if (type === "squeak") { bonus += 15; sfx("squeak"); spawnSplash(duck.x, duck.y, COL.item, 8); }
-      else if (type === "gem") { bonus += 40; sfx("gem"); spawnSplash(duck.x, duck.y, "#8fe9e2", 12); }
-      else if (type === "shield") { duck.shield = true; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 12); }
-      else if (type === "turbo") { duck.turbo = 3.2; duck.invuln = 3.2; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 12); }
+      const ix = duck.x, iy = duck.y - 12;
+      if (type === "coin") { addScore(8, ix, iy, "#FFD93D"); sfx("coin"); spawnSplash(duck.x, duck.y, "#FFD93D", 7); }
+      else if (type === "squeak") { addScore(15, ix, iy, COL.item); sfx("squeak"); spawnSplash(duck.x, duck.y, COL.item, 8); }
+      else if (type === "gem") { addScore(40, ix, iy, "#8fe9e2"); sfx("gem"); spawnSplash(duck.x, duck.y, "#8fe9e2", 12); }
+      else if (type === "shield") { duck.shield = true; combo++; comboTimer = 2.0; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 12); }
+      else if (type === "turbo") { duck.turbo = 3.2; duck.invuln = 3.2; combo++; comboTimer = 2.0; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 12); }
       else if (type === "mega") { duck.mega = 5.5; duck.invuln = 5.5; sfx("mega"); shakeT = 0.3; spawnSplash(duck.x, duck.y, "#FFD93D", 18); }
     }
 
@@ -430,12 +439,34 @@
       }
     }
 
+    // Combo-Multiplikator aus der aktuellen Combo
+    function comboMult() { return combo < 3 ? 1 : combo < 6 ? 2 : combo < 10 ? 3 : 4; }
+
+    // Punkte gutschreiben (x Combo) + Floating-Popup + Combo erhoehen
+    function addScore(pts, x, y, color) {
+      const total = pts * comboMult();
+      bonus += total;
+      combo++;
+      comboTimer = 2.0;
+      popups.push({ x, y, life: 0.9, text: "+" + total, color: color || COL.foam });
+    }
+
+    // Popups aufsteigen lassen + ausblenden
+    function updatePopups(dt) {
+      for (let i = popups.length - 1; i >= 0; i--) {
+        popups[i].y -= dt * 22;
+        popups[i].life -= dt;
+        if (popups[i].life <= 0) popups.splice(i, 1);
+      }
+    }
+
     // ================================================================
     // === GAME-OVER ==================================================
     // ================================================================
     function gameOver() {
       state = STATE.OVER;
       sfx("over");
+      if (navigator.vibrate) navigator.vibrate(120);
       shakeT = 0.4;
       spawnSplash(duck.x, duck.y, COL.foam, 16);
       gameOverMsg = QUACKS[Math.floor(Math.random() * QUACKS.length)];
@@ -554,6 +585,18 @@
       ctx.globalAlpha = 1;
     }
 
+    // Floating-Score-Popups (+8, +40, ...)
+    function drawPopups() {
+      ctx.textAlign = "center";
+      ctx.font = "bold 10px 'Trebuchet MS', sans-serif";
+      for (const p of popups) {
+        ctx.globalAlpha = clamp(p.life / 0.9, 0, 1);
+        ctx.fillStyle = p.color;
+        ctx.fillText(p.text, Math.round(p.x), Math.round(p.y));
+      }
+      ctx.globalAlpha = 1;
+    }
+
     // Enten-Sprite um den Ursprung (0,0) — wiederverwendbar (Spiel + Start-Screen)
     function drawDuckSprite() {
       if (imgReady(IMG.duck)) {
@@ -633,6 +676,13 @@
       ctx.fillText(String(score), 7, 17);
       ctx.fillStyle = COL.foam;             // Haupttext
       ctx.fillText(String(score), 6, 16);
+
+      // Combo-Anzeige (ab x2)
+      if (combo >= 3) {
+        ctx.fillStyle = COL.item;
+        ctx.font = "bold 11px 'Trebuchet MS', monospace";
+        ctx.fillText("COMBO x" + comboMult(), 6, 31);
+      }
 
       // aktive Power-ups oben rechts (unter dem Mute-Button)
       ctx.textAlign = "right";
@@ -775,6 +825,7 @@
       // fahrende Ente nur im Spiel / Game-Over (Start zeigt eigene Hero-Ente)
       if (state !== STATE.START) drawDuck();
       drawParticles();
+      drawPopups();
       ctx.restore();
 
       // HUD & Overlays ohne Shake (bleiben ruhig lesbar)
@@ -794,6 +845,7 @@
       if (state === STATE.PLAY) update(dt);
       if (shakeT > 0) shakeT -= dt;     // Shake klingt auch im Game-Over aus
       updateParticles(dt);              // Partikel laufen in jedem State weiter
+      updatePopups(dt);
       render();
       requestAnimationFrame(frame);
     }
