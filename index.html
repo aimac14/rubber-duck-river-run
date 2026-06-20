@@ -88,6 +88,7 @@
     let coins = +(localStorage.getItem("rdrr_coins") || 0);   // persistentes Muenzen-Konto
     let runCoins = 0;                                         // im aktuellen Lauf gesammelt
     let revivedThisRun = false;                              // Weiterspielen 1x pro Lauf
+    let claudeSeen = false;                                  // Easter-Egg: Konsolen-Gruss nur 1x pro Session
 
     // Enten-Skins (im Shop kaufbar)
     const DUCKS = [
@@ -246,6 +247,12 @@
       else if (kind === "smash") tone(170, 55, 0.12, "sawtooth", 0.17);      // Hindernis zerschmettert
       else if (kind === "start") { tone(500, 0, 0.07, "square", 0.1); setTimeout(() => tone(760, 0, 0.1, "square", 0.1), 75); } // Spielstart
       else if (kind === "over") tone(320, 80, 0.5, "sawtooth", 0.18);        // Game-Over (tief)
+      else if (kind === "claude") {                                          // Easter-Egg: freundliche Mini-Fanfare (C-E-G-C')
+        tone(523, 0, 0.08, "triangle", 0.14);
+        setTimeout(() => tone(659, 0, 0.08, "triangle", 0.14), 70);
+        setTimeout(() => tone(784, 0, 0.08, "triangle", 0.14), 140);
+        setTimeout(() => tone(1047, 0, 0.16, "triangle", 0.15), 210);
+      }
     }
 
     // ================================================================
@@ -379,6 +386,11 @@
 
     // Items: meist Quietsche (Punkte), selten Schild oder Turbo
     function spawnItem() {
+      // === EASTER-EGG: super-seltenes Claude-Maennchen (erst nach kurzer Anlaufzeit) ===
+      if (dist > 250 && Math.random() < 0.04) {
+        items.push({ type: "claude", x: 18 + Math.random() * (W - 36), y: -12, t: 0 });
+        return;
+      }
       const r = Math.random();
       let type;
       if (r < 0.32) type = "coin";        // haeufig, kleiner Bonus
@@ -530,6 +542,24 @@
       else if (type === "turbo") { duck.turbo = 3.2; duck.invuln = 3.2; combo++; comboTimer = 2.0; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 12); }
       else if (type === "magnet") { duck.magnet = 6; combo++; comboTimer = 2.0; addMission("magnet", 1); sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 10); }
       else if (type === "mega") { duck.mega = 5.5; duck.invuln = 5.5; sfx("mega"); shakeT = 0.3; spawnSplash(duck.x, duck.y, "#FFD93D", 18); }
+      else if (type === "claude") {
+        // === EASTER-EGG: dicker Bonus + kompletter Boost + Gruss an die Coding-Jury ===
+        addScore(100, ix, iy - 6, "#D97757");
+        runCoins += 10;
+        duck.shield = true;                          // Schild
+        duck.magnet = 8;                             // Magnet
+        duck.turbo = 2.5;                            // Turbo-Schub
+        duck.invuln = Math.max(duck.invuln, 3.0);    // kurz unverwundbar
+        combo += 3; comboTimer = 2.5;
+        sfx("claude");
+        shakeT = Math.max(shakeT, 0.18);
+        spawnSplash(duck.x, duck.y, "#D97757", 22);
+        popups.push({ x: duck.x, y: duck.y - 28, life: 1.4, text: "CLAUDE!", color: "#D97757" });
+        if (!claudeSeen) {
+          claudeSeen = true;
+          console.log("%c🤖 Easter-Egg gefunden: Claude war hier! Dieses Minigame wurde mit Claude Code gebaut.", "color:#D97757;font-weight:bold;font-size:13px");
+        }
+      }
     }
 
     // Spritz-Partikel erzeugen (radial)
@@ -662,6 +692,7 @@
 
     // Items — generiertes Sprite, leicht pulsierend (Fallback: Pixel-Icon)
     function drawItem(it) {
+      if (it.type === "claude") { drawClaudeItem(it); return; }   // Easter-Egg: eigenes Pixel-Sprite
       const pulse = 1 + 0.12 * Math.sin(it.t * 8);
       const img = it.type === "squeak" ? IMG.star
         : it.type === "shield" ? IMG.shield
@@ -682,6 +713,51 @@
       px(-4, -3, 8, 6, COL.item);
       px(-3, -4, 6, 8, COL.item);
       ctx.globalAlpha = 0.9; px(-2, -3, 2, 2, COL.foam); ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+
+    // === EASTER-EGG: Claude-Maennchen (Pixel-Sprite, terracotta) ===
+    // bewusst „8-bit" gehalten — ein kleiner Gruss an Claude Code, mit dem das Spiel gebaut wurde
+    const CLAUDE_PX = [
+      "..########..",
+      "..########..",
+      "############",   // Arme stehen seitlich ab
+      "############",
+      "..#oo##oo#..",   // Augen (quadratisch)
+      "..#oo##oo#..",
+      "..########..",
+      "..########..",
+      "..########..",
+      "..##.##.##..",   // drei Beinchen
+      "..##.##.##..",
+    ];
+    // zeichnet das Maennchen zentriert um (0,0)
+    function drawClaudeSprite(scale) {
+      const u = 1.7 * (scale || 1);          // logische Groesse pro Bitmap-Zelle
+      const ox = -6 * u, oy = -5.5 * u;      // auf die Sprite-Mitte zentrieren
+      for (let r = 0; r < CLAUDE_PX.length; r++) {
+        const row = CLAUDE_PX[r];
+        for (let c = 0; c < row.length; c++) {
+          const ch = row[c];
+          if (ch === ".") continue;
+          ctx.fillStyle = ch === "o" ? "#1a1a1a" : "#D97757";    // Augen schwarz, Koerper terracotta
+          ctx.fillRect(ox + c * u, oy + r * u, u + 0.6, u + 0.6); // +0.6 schliesst Hairline-Luecken
+        }
+      }
+    }
+    // das schwimmende Claude-Item inkl. Glow + Bob/Pulse (damit das seltene Egg auffaellt)
+    function drawClaudeItem(it) {
+      const pulse = 1 + 0.10 * Math.sin(it.t * 7);
+      const bob = Math.sin(it.t * 4) * 1.2;
+      ctx.save();
+      ctx.globalAlpha = 0.18 + 0.10 * Math.sin(it.t * 6);
+      ctx.fillStyle = "#D97757";
+      ctx.beginPath(); ctx.arc(it.x, it.y + bob, 11 * pulse, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      ctx.save();
+      ctx.translate(it.x, it.y + bob);
+      ctx.scale(pulse, pulse);
+      drawClaudeSprite(0.95);
       ctx.restore();
     }
 
