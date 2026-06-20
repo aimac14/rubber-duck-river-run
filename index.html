@@ -128,7 +128,7 @@
 
     // Die Ente bleibt vertikal etwa mittig, Welt scrollt an ihr vorbei
     // shield = Seifenblase aktiv, turbo/invuln = Restzeit in Sekunden
-    const duck = { x: W / 2, y: H * 0.64, targetX: W / 2, tilt: 0, vx: 0, shield: false, turbo: 0, invuln: 0, mega: 0 };
+    const duck = { x: W / 2, y: H * 0.64, targetX: W / 2, tilt: 0, vx: 0, shield: false, turbo: 0, invuln: 0, mega: 0, magnet: 0 };
 
     // Container fuer Spielobjekte
     const obstacles = [];
@@ -146,6 +146,9 @@
       water: "assets/water.jpg",
       whirl: "assets/whirl.png", mega: "assets/mega.png",
       coin: "assets/coin.png", gem: "assets/gem.png",
+      magnet: "assets/magnet.png",
+      duck_detective: "assets/duck_detective.png", duck_pirate: "assets/duck_pirate.png",
+      duck_robot: "assets/duck_robot.png", duck_unicorn: "assets/duck_unicorn.png",
     };
     for (const k in SPRITE_SRC) { IMG[k] = new Image(); IMG[k].src = SPRITE_SRC[k]; }
     function imgReady(img) { return img && img.complete && img.naturalWidth > 0; }
@@ -260,6 +263,7 @@
       duck.turbo = 0;
       duck.invuln = 0;
       duck.mega = 0;
+      duck.magnet = 0;
       duck.vx = 0;
       shakeT = 0;
       newBest = false;
@@ -294,11 +298,12 @@
     function spawnItem() {
       const r = Math.random();
       let type;
-      if (r < 0.34) type = "coin";        // haeufig, kleiner Bonus
-      else if (r < 0.56) type = "squeak"; // Quietsche-Stern
-      else if (r < 0.68) type = "gem";    // selten, grosser Bonus
-      else if (r < 0.80) type = "shield";
-      else if (r < 0.93) type = "turbo";
+      if (r < 0.32) type = "coin";        // haeufig, kleiner Bonus
+      else if (r < 0.52) type = "squeak"; // Quietsche-Stern
+      else if (r < 0.64) type = "gem";    // selten, grosser Bonus
+      else if (r < 0.76) type = "shield";
+      else if (r < 0.87) type = "turbo";
+      else if (r < 0.95) type = "magnet"; // zieht Items an
       else type = "mega";                 // sehr selten: Riesen-Ente
       items.push({ type, x: 14 + Math.random() * (W - 28), y: -10, t: 0 });
     }
@@ -316,6 +321,7 @@
       if (duck.turbo > 0) duck.turbo -= dt;
       if (duck.invuln > 0) duck.invuln -= dt;
       if (duck.mega > 0) duck.mega -= dt;
+      if (duck.magnet > 0) duck.magnet -= dt;
       if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) combo = 0; }
 
       // Tageszeit-Phase wechseln (mit kurzer Namens-Einblendung)
@@ -394,6 +400,11 @@
         const it = items[i];
         it.y += speed * dt;
         it.t += dt;
+        // Magnet zieht Items zur Ente
+        if (duck.magnet > 0) {
+          const dx = duck.x - it.x, dy = duck.y - it.y, d = Math.hypot(dx, dy);
+          if (d < 85 && d > 1) { it.x += (dx / d) * 150 * dt; it.y += (dy / d) * 150 * dt; }
+        }
         if (hitCircleRect(duck.x, duck.y, 9, it.x - 6, it.y - 6, 12, 12)) {
           collectItem(it.type);
           items.splice(i, 1);
@@ -431,6 +442,7 @@
       else if (type === "gem") { addScore(40, ix, iy, "#8fe9e2"); sfx("gem"); spawnSplash(duck.x, duck.y, "#8fe9e2", 12); }
       else if (type === "shield") { duck.shield = true; combo++; comboTimer = 2.0; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 12); }
       else if (type === "turbo") { duck.turbo = 3.2; duck.invuln = 3.2; combo++; comboTimer = 2.0; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 12); }
+      else if (type === "magnet") { duck.magnet = 6; combo++; comboTimer = 2.0; sfx("power"); spawnSplash(duck.x, duck.y, COL.item, 10); }
       else if (type === "mega") { duck.mega = 5.5; duck.invuln = 5.5; sfx("mega"); shakeT = 0.3; spawnSplash(duck.x, duck.y, "#FFD93D", 18); }
     }
 
@@ -555,6 +567,7 @@
         : it.type === "turbo" ? IMG.turbo
         : it.type === "coin" ? IMG.coin
         : it.type === "gem" ? IMG.gem
+        : it.type === "magnet" ? IMG.magnet
         : IMG.mega;
       if (imgReady(img)) {
         const s = (it.type === "mega" ? 24 : 18) * pulse;   // Mega-Item groesser
@@ -725,7 +738,8 @@
       ctx.font = "bold 9px 'Trebuchet MS', monospace";
       let hy = 32;
       if (duck.shield) { ctx.fillStyle = COL.foam; ctx.fillText("SCHILD", W - 6, hy); hy += 11; }
-      if (duck.turbo > 0) { ctx.fillStyle = COL.item; ctx.fillText("TURBO", W - 6, hy); }
+      if (duck.turbo > 0) { ctx.fillStyle = COL.item; ctx.fillText("TURBO", W - 6, hy); hy += 11; }
+      if (duck.magnet > 0) { ctx.fillStyle = COL.item; ctx.fillText("MAGNET", W - 6, hy); }
 
       // Phasen-Name beim Wechsel kurz einblenden
       if (phaseFlash > 0) {
