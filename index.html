@@ -99,6 +99,17 @@
     let combo = 0;           // aktuelle Combo (schnelle Pickups/Dodges)
     let comboTimer = 0;      // Restzeit der Combo (s)
     const popups = [];       // Floating-Score-Texte
+    let lastPhase = 0;       // aktuelle Tageszeit-Phase
+    let phaseFlash = 0;      // Einblend-Timer fuer den Phasen-Namen
+
+    // Tageszeit-Phasen (Farb-Tint ueber die Szene), wechseln mit der Distanz
+    const PHASES = [
+      { name: "TAG", col: [255, 240, 180], a: 0.0 },
+      { name: "SONNENUNTERGANG", col: [255, 110, 50], a: 0.24 },
+      { name: "NACHT", col: [18, 26, 80], a: 0.42 },
+      { name: "MORGEN", col: [255, 170, 200], a: 0.16 },
+    ];
+    const PHASE_LEN = 1500;  // Distanz pro Tageszeit-Phase
 
     // Rubber-Duck-Debugging-Sprueche (Gruss an die Coding-Jury)
     const QUACKS = [
@@ -243,6 +254,8 @@
       combo = 0;
       comboTimer = 0;
       popups.length = 0;
+      lastPhase = 0;
+      phaseFlash = 0;
       duck.shield = false;
       duck.turbo = 0;
       duck.invuln = 0;
@@ -304,6 +317,11 @@
       if (duck.invuln > 0) duck.invuln -= dt;
       if (duck.mega > 0) duck.mega -= dt;
       if (comboTimer > 0) { comboTimer -= dt; if (comboTimer <= 0) combo = 0; }
+
+      // Tageszeit-Phase wechseln (mit kurzer Namens-Einblendung)
+      const ph = Math.floor(dist / PHASE_LEN) % PHASES.length;
+      if (ph !== lastPhase) { lastPhase = ph; phaseFlash = 2.0; }
+      if (phaseFlash > 0) phaseFlash -= dt;
 
       // Schwierigkeit: Tempo steigt mit der Distanz (je nach Stufe); Turbo beschleunigt
       const d = DIFFS[diffKey];
@@ -597,6 +615,24 @@
       ctx.globalAlpha = 1;
     }
 
+    // Tageszeit-Tint ueber die Szene (sanfter Uebergang zwischen Phasen)
+    function drawTint() {
+      const f = dist / PHASE_LEN;
+      const i = Math.floor(f) % PHASES.length;
+      const j = (i + 1) % PHASES.length;
+      const t = f - Math.floor(f);
+      const A = PHASES[i], B = PHASES[j];
+      const a = lerp(A.a, B.a, t);
+      if (a < 0.01) return;
+      const r = lerp(A.col[0], B.col[0], t) | 0;
+      const g = lerp(A.col[1], B.col[1], t) | 0;
+      const b = lerp(A.col[2], B.col[2], t) | 0;
+      ctx.globalAlpha = a;
+      ctx.fillStyle = "rgb(" + r + "," + g + "," + b + ")";
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+    }
+
     // Enten-Sprite um den Ursprung (0,0) — wiederverwendbar (Spiel + Start-Screen)
     function drawDuckSprite() {
       if (imgReady(IMG.duck)) {
@@ -690,6 +726,16 @@
       let hy = 32;
       if (duck.shield) { ctx.fillStyle = COL.foam; ctx.fillText("SCHILD", W - 6, hy); hy += 11; }
       if (duck.turbo > 0) { ctx.fillStyle = COL.item; ctx.fillText("TURBO", W - 6, hy); }
+
+      // Phasen-Name beim Wechsel kurz einblenden
+      if (phaseFlash > 0) {
+        ctx.globalAlpha = clamp(phaseFlash, 0, 1);
+        ctx.fillStyle = COL.foam;
+        ctx.textAlign = "center";
+        ctx.font = "bold 13px 'Trebuchet MS', sans-serif";
+        ctx.fillText(PHASES[lastPhase].name, W / 2, 52);
+        ctx.globalAlpha = 1;
+      }
     }
 
     function drawStart() {
@@ -826,6 +872,7 @@
       if (state !== STATE.START) drawDuck();
       drawParticles();
       drawPopups();
+      drawTint();
       ctx.restore();
 
       // HUD & Overlays ohne Shake (bleiben ruhig lesbar)
@@ -855,6 +902,7 @@
     // === HILFSFUNKTIONEN ============================================
     // ================================================================
     function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+    function lerp(a, b, t) { return a + (b - a) * t; }
 
     // Kollision: Kreis (Ente) gegen Rechteck (Hindernis-Hitbox)
     function hitCircleRect(cx, cy, r, rx, ry, rw, rh) {
